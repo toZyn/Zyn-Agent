@@ -89,8 +89,8 @@ async function requestModel(messages, state, ui, options = {}) {
 
     try {
       let answerChunks = '';
+      let requestStreamText = '';
       let streamStarted = false;
-      let suppressFinalStream = false;
       let assistantRendered = false;
       const result = await chat({
         messages,
@@ -111,72 +111,23 @@ async function requestModel(messages, state, ui, options = {}) {
             thinkingStarted = false;
           }
           answerChunks += delta;
-          const trimmed = answerChunks.trim();
 
-          // Multi-JSON: comment then tool/final in same message
-          if (!streamStarted && trimmed.includes('}\n{')) {
-            const parts = trimmed.split('\n');
-            const lastLine = parts[parts.length - 1].trim();
-            if (lastLine.startsWith('{')) {
-              answerChunks = lastLine;
-              return;
-            }
+          const visible = require('./stream-text').assistantStreamText(answerChunks);
+          if (visible === null) return;
+          if (!streamStarted && visible) {
+            stopThinking();
+            if (streamOutput) ui.beginAssistantStream(state);
+            streamStarted = true;
+            answerStarted = true;
           }
-
-          if (!streamStarted && trimmed.startsWith('{')) {
-            const isComment = /"type"\s*:\s*"comment"/.test(trimmed);
-            if (isComment) return;
-
-            const isToolCall = /"type"\s*:\s*"tool"/.test(trimmed);
-            if (isToolCall) {
-              const toolMatch = trimmed.match(/"tool"\s*:\s*"([\w-]+)"/);
-              const prepLabel = state.language === 'es' ? 'Preparando' : 'Preparing';
-              if (toolMatch) {
-                const toolName = toolMatch[1];
-                if (!state.__toolNameShown) {
-                  ui.logEvent(state, 'tool', `${prepLabel} ${toolName}`);
-                  state.__toolNameShown = true;
-                } else if (typeof ui.updateLastEventTitle === 'function') {
-                  ui.updateLastEventTitle(`${prepLabel} ${toolName}`);
-                }
-              } else if (!state.__toolNameShown) {
-                ui.logEvent(state, 'tool', `${prepLabel} ...`);
-                state.__toolNameShown = true;
-              }
-              return;
+          if (streamOutput && streamStarted) {
+            const previous = requestStreamText;
+            if (visible.startsWith(previous)) {
+              const chunk = visible.slice(previous.length);
+              if (chunk) ui.writeAssistantDelta(state, chunk);
+              assistantRendered = assistantRendered || Boolean(chunk);
+              requestStreamText = visible;
             }
-            const hasFinalKey = /"type"\s*:\s*"final"/.test(trimmed);
-            if (hasFinalKey) {
-              const contentMatch = trimmed.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-              if (contentMatch) {
-                stopThinking();
-                if (streamOutput) ui.beginAssistantStream(state);
-                streamStarted = true;
-                answerStarted = true;
-                suppressFinalStream = true;
-                if (streamOutput) {
-                  assistantRendered = true;
-                  ui.writeAssistantDelta(state, contentMatch[1]);
-                }
-                answerChunks = '';
-                return;
-              }
-              suppressFinalStream = true;
-              return;
-            }
-            if (trimmed.length > 80) {
-              stopThinking();
-              if (streamOutput) ui.beginAssistantStream(state);
-              streamStarted = true;
-              answerStarted = true;
-              answerChunks = '';
-              return;
-            }
-            return;
-          }
-          if (streamStarted && answerStarted && streamOutput && !suppressFinalStream) {
-            assistantRendered = true;
-            ui.writeAssistantDelta(state, delta);
           }
         },
       });

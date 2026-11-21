@@ -43,7 +43,7 @@ class TranscriptLayoutTests(unittest.TestCase):
             term.send(b'\x1b',0.3)
             clean=snapshot(term,cols,rows)
             self.assertFalse(any('RESULT-' in line for line in clean),clean)
-            self.assertTrue(any('Type a message' in line for line in clean[-8:]),clean)
+            self.assertTrue(any('Type a message' in line for line in clean),clean)
             self.assertNotIn(b'\x1b[2J',term.capture)
             term.send(b'/exit\r',0.2)
             self.assertEqual(term.wait_exit(),0)

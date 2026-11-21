@@ -12,7 +12,7 @@ class CommandIntegrationTests(unittest.TestCase):
                 (b'/stats\r', 'Actual billed usage'),
                 (b'/login\r', '/login chatgpt'),
                 (b'/logout github\r', 'gh auth logout'),
-                (b'/model unknown-test-model\r', 'model'),
+                (b'/model unknown-test-model\r', 'zyncloud-minimax-m3'),
             ]
             for command, expected in scenarios:
                 offset = len(terminal.capture)

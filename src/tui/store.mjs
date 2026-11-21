@@ -68,8 +68,8 @@ export class UIStore extends EventEmitter {
   }
 
   scrollBy(delta) {
-    const step = Number.isFinite(delta) ? Math.trunc(delta) : (delta > 0 ? this.items.length : -this.items.length);
-    const next = Math.max(0, Math.min(this.items.length - 1, this.scrollOffset + step));
+    const step = Number.isFinite(delta) ? Math.trunc(delta) : (delta > 0 ? (this.scrollMax ?? this.items.length) : -(this.scrollMax ?? this.items.length));
+    const next = Math.max(0, Math.min((this.scrollMax ?? this.items.length - 1), this.scrollOffset + step));
     if (next !== this.scrollOffset) {
       this.scrollOffset = next;
       this._emit();

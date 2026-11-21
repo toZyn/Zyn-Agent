@@ -68,14 +68,14 @@ test('original conversation content is not destructively removed by a 200k-chara
  assert.equal(state.history.length,80);
 });
 
-test('terminal output preview is bounded, while original content remains intact',async()=>{
+test('terminal output remains complete at narrow widths',async()=>{
  const {formatEventPreview}=await import('../src/tui/event-display.mjs');
  const original='Exit code: 0\nSTDOUT: '+('0123456789'.repeat(120));
  const item={kind:'ok',title:'Command completed',detail:original};
  const preview=formatEventPreview(item,52);
  assert.ok(preview.lines.length<=2);
- assert.ok(preview.lines.every(line=>line.length<=42));
- assert.match(preview.hint,/transcript/i);
+ assert.equal(preview.lines.join("\n"),original);
+ assert.equal(preview.hint,'');
  assert.equal(item.detail,original);
 });
 

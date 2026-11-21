@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UIStore } from '../src/tui/store.mjs';
 
-test('the store retains only the latest visible items', () => {
+test('the store preserves earlier messages for scrolling', () => {
   const store = new UIStore((en) => en);
   for (let i = 0; i < 900; i++) store.addItem({ type: 'event', title: String(i) });
-  assert.equal(store.items.length, 400);
-  assert.equal(store.items[0].title, '500');
+  assert.equal(store.items.length, 900);
+  assert.equal(store.items[0].title, '0');
   assert.equal(store.items.at(-1).title, '899');
 });
 

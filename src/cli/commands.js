@@ -280,7 +280,8 @@ async function runProviderModelsSelector(state, deps, providerKey) {
     try { await refreshChatGPTCatalog(); }
     catch (error) { console.log(`Unable to refresh ChatGPT models: ${error.message}`); return null; }
   }
-  if (providerKey === 'zyncloud') {
+  const hasLocalModels = Object.values(MODELS).some(model => model.provider === providerKey);
+  if (providerKey === 'zyncloud' && !(state.tuiSelect && hasLocalModels)) {
     try {
       const { syncProvider } = require('../providers/catalog');
       const models = await syncProvider(providerKey);

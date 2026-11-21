@@ -21,7 +21,7 @@ class StreamingAgentVisualTests(unittest.TestCase):
                     lines=snapshot(term,cols,rows)
                     screen='\n'.join(lines)
                     if cols >= 62:
-                        self.assertIn('AGENT',screen)
+                        self.assertNotIn('AGENT',screen)
                         self.assertIn('general',screen)
                         self.assertIn('completed',screen)
                     self.assertNotIn('"agent_id"',screen)

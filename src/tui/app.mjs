@@ -3,17 +3,15 @@ import { readTerminalDimensions } from './dimensions.mjs';
 import { UIStore } from './store.mjs';
 import { getTheme, SPIN_FRAMES } from './themes.mjs';
 import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
-import { selectViewportItems } from './viewport.mjs';
 import { confirmationViewport } from './confirmation-view.mjs';
 import { formatEventPreview } from './event-display.mjs';
 import { formatTerminalTable } from './table-layout.mjs';
-import { visibleStreamTail } from './stream-viewport.mjs';
 import { transcriptViewport } from './transcript-view.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
 import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor, mouseWheelSteps } from './input-events.mjs';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, useInput, useApp, useStdout } from 'ink';
+import { render, renderToString, Box, Text, useInput, useApp, useStdout } from 'ink';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -39,6 +37,7 @@ const {
 const { normalizeLanguage, t } = require('../i18n');
 
 const h = React.createElement;
+const rowCache = new WeakMap();
 function getTuiLang() {
   return normalizeLanguage(global.__zynCurrentLanguage || 'en');
 }
@@ -59,12 +58,13 @@ global.__zynApplyTheme = (name) => {
 };
 
 function useStore(store) {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const handler = () => setTick(t => t + 1);
     store.on('update', handler);
     return () => store.off('update', handler);
   }, [store]);
+  return tick;
 }
 
 function useDimensions() {
@@ -133,18 +133,15 @@ function makeOsc8Link(text, url) {
 }
 
 function InlineLine({ text, color }) {
-  const parts = parseInline(text);
   const base = color || T.text;
-  return h(Box, { flexWrap: 'wrap' },
-    ...parts.map((p, i) => {
-      if (p.t === 'bold') return h(Text, { key: String(i), color: base, bold: true }, p.v);
-      if (p.t === 'italic') return h(Text, { key: String(i), color: T.textMuted, italic: true }, p.v);
-      if (p.t === 'code') return h(Text, { key: String(i), color: T.cyan, backgroundColor: T.codeBg }, ' ' + p.v + ' ');
-      if (p.t === 'link') return h(Box, { key: String(i), flexWrap: 'wrap' },
-        h(Text, { color: T.accent, underline: true }, makeOsc8Link(p.text, p.url)),
-        h(Text, { color: T.textMuted }, ' (' + makeOsc8Link(p.url, p.url) + ')'),
-      );
-      return h(Text, { key: String(i), color: base }, p.v);
+  return h(Text, { color: base, wrap: 'wrap' },
+    ...parseInline(text).map((p, i) => {
+      const props = { key: String(i) };
+      if (p.t === 'bold') return h(Text, { ...props, bold: true }, p.v);
+      if (p.t === 'italic') return h(Text, { ...props, italic: true }, p.v);
+      if (p.t === 'code') return h(Text, { ...props, color: T.cyan }, p.v);
+      if (p.t === 'link') return h(Text, { ...props, color: T.accent, underline: true }, makeOsc8Link(p.text, p.url));
+      return h(Text, props, p.v);
     }),
   );
 }
@@ -329,8 +326,8 @@ function splitTableCells(row) {
 }
 
 function CodeBlock({ lang, code, width }) {
-  const maxW = Math.max(24, Math.min((width || 80) - 4, 120));
-  const inner = Math.max(10, maxW - 4);
+  const maxW = Math.max(4, (width || 80) - 4);
+  const inner = Math.max(1, maxW - 4);
   const langLabel = lang ? ' ' + lang + ' ' : '';
   const topBar = '┌' + (langLabel ? '─' + langLabel : '') + '─'.repeat(Math.max(0, maxW - 2 - langLabel.length)) + '┐';
   const botBar = '└' + '─'.repeat(maxW - 2) + '┘';
@@ -465,43 +462,17 @@ function SpinnerLine({ label, started }) {
 
 function EventLine({ kind, title, detail, width }) {
   const cfg = {
-    info: { sym: '·', color: T.textGhost },
-    think: { sym: '◐', color: T.textGhost },
-    comment: { sym: '›', color: T.accent },
-    tool: { sym: '↳', color: T.purple },
-    ok: { sym: '✓', color: T.green },
-    warn: { sym: '▲', color: T.amber },
-    error: { sym: '×', color: T.red },
+    info: ['·', T.textGhost], think: ['◐', T.textGhost],
+    comment: ['›', T.accent], tool: ['↳', T.purple],
+    ok: ['>', T.green], warn: ['▲', T.amber], error: ['x', T.red],
   };
-  const { sym, color } = cfg[kind] || cfg.info;
+  const [sym, color] = cfg[kind] || cfg.info;
   const content = formatEventPreview({ kind, title, detail }, width);
-  const isAgent = /\b(spawn_agent|wait_agent|followup_agent|resume_agent|close_agent|interrupt_agent)\b/.test(String(title || ''));
-  if (isAgent) {
-    return h(Box, { paddingLeft: 3, paddingRight: 3, marginTop: 1, marginBottom: 0, flexDirection: 'column' },
-      h(Box, { borderStyle: 'round', borderColor: T.borderLight, flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
-        h(Box, { gap: 1 },
-          h(Text, { color: T.accent, bold: true }, 'AGENT'),
-          h(Text, { color, bold: true }, sym),
-          h(Text, { color: T.textDim, wrap: 'truncate-end' }, String(title || '').trim()),
-        ),
-        ...content.lines.map((line, i) => h(Text, {
-          key: String(i), color: kind === 'error' ? T.red : T.accentSoft,
-          wrap: 'truncate-end',
-        }, line)),
-      ),
-    );
-  }
-  return h(Box, { paddingLeft: 3, paddingRight: 3, marginTop: kind === 'comment' ? 1 : 0, flexDirection: 'column' },
-    h(Box, { gap: 1 },
-      h(Text, { color, bold: true }, sym),
-      h(Text, { color: kind === 'error' ? T.red : T.textDim, bold: true, wrap: 'truncate-end' }, String(title || '').trim()),
-    ),
-    content.lines.length
-      ? h(Box, { paddingLeft: 2, flexDirection: 'column' },
-          ...content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'truncate-end' }, line)),
-          content.hint ? h(Text, { color: T.accentDim, wrap: 'truncate-end' }, content.hint) : null,
-        )
-      : null,
+  return h(Box, { paddingLeft: width < 48 ? 1 : 3, paddingRight: 1, flexDirection: 'column', flexShrink: 0 },
+    h(Text, { color, wrap: 'wrap' }, sym + ' ' + String(title || '').trim()),
+    content.lines.length ? h(Box, { paddingLeft: 2, flexDirection: 'column', flexShrink: 0 },
+      ...content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'wrap' }, line)),
+    ) : null,
   );
 }
 
@@ -591,7 +562,7 @@ function AnswerBlock({ text, live, width }) {
     const displayText = normalizeAssistantDisplayText(text);
     return { displayText };
   }, [text]);
-  const contentWidth = Math.max(40, (width || 80) - 8);
+  const contentWidth = Math.max(1, (width || 80) - 8);
   return h(Box, { flexDirection: 'column', paddingLeft: 3, paddingRight: 3, marginTop: 1 },
     h(Box, { gap: 1, marginBottom: 0 },
       h(Text, { color: T.accentSoft, bold: true }, '\u25c9'),
@@ -1184,7 +1155,8 @@ function InputBar({ onSubmit, processing, width = 100, height = 24, draft = '', 
 }
 
 export function App({ store, state, onSubmit }) {
-  useStore(store);
+  const storeVersion = useStore(store);
+  const [rendered, setRendered] = useState(null);
   global.__zynCurrentLanguage = state?.language || 'en';
   const { exit } = useApp();
   const { width, height } = useDimensions();
@@ -1373,12 +1345,7 @@ export function App({ store, state, onSubmit }) {
       return;
     }
     if (!store.confirmRequest) {
-      const visible = selectViewportItems(store.items, {
-        columns: width,
-        rows: Math.max(1, height - 8),
-        offset: store.scrollOffset,
-      });
-      const page = Math.max(1, visible.length - 1);
+      const page = Math.max(1, height - 8);
       if (key.pageUp || (key.ctrl && key.upArrow)) { store.scrollBy(page); return; }
       if (key.pageDown || (key.ctrl && key.downArrow)) { store.scrollBy(-page); return; }
       if (key.ctrl && key.home) { store.scrollBy(Infinity); return; }
@@ -1392,13 +1359,6 @@ export function App({ store, state, onSubmit }) {
     if (decision === 'y' || decision === 's' || decision === '1') store.resolveConfirm(true);
     else if (decision === 'n' || decision === '2' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
   });
-
-  if (store.transcriptView) {
-    return h(Box, { flexDirection: 'column', height: '100%', width: '100%' },
-      h(TranscriptPanel, { view: store.transcriptView, width, height: Math.max(7, height - 3) }),
-      h(StatusBar, { store, model: modelLabel, providerKey: MODELS[state.activeModel]?.provider || 'unknown', processing: false, width, turnCount: store.turnCount }),
-    );
-  }
 
   const showInput   = !store.confirmRequest && !store.selectRequest && !store.inputRequest && !store.authFlow;
   const showConfirm = !!store.confirmRequest;
@@ -1419,7 +1379,7 @@ export function App({ store, state, onSubmit }) {
     streamingArea.push(
       h(ThinkingBlock, {
         key: 'thinking',
-        text: visibleStreamTail(store.liveThinking.text, Math.max(12, width - 12), Math.max(4, Math.floor((height - 6) / 2) - 3)),
+        text: store.liveThinking.text,
         live: true, width,
       })
     );
@@ -1431,7 +1391,7 @@ export function App({ store, state, onSubmit }) {
       streamingArea.push(
         h(AnswerBlock, {
           key: 'answer',
-          text: visibleStreamTail(liveText, Math.max(12, width - 14), Math.max(4, Math.floor((height - 6) / 2) - 3)),
+          text: liveText,
           live: true, width,
         })
       );
@@ -1466,28 +1426,50 @@ export function App({ store, state, onSubmit }) {
     );
   }
 
-  const streamingRows = store.liveAnswer || store.liveThinking
-    ? Math.max(2, Math.floor((height - 6) / 2))
-    : store.spinner ? 2 : 0;
   const modalRows = showSelect
     ? Math.max(7, Math.min(20, Math.floor(width / 5), height - 12) + 5)
     : showPrompt ? 6 : showConfirm ? Math.min(height - 4, store.confirmRequest?.expanded ? 12 : 8) : showAuth ? 5 : 0;
   const inputRows = showInput ? (store.inputDraft.startsWith('/') ? Math.min(10, Math.max(2, height - 5)) : 2) : modalRows;
-  const historyRows = Math.max(1, height - inputRows - streamingRows - 4);
-  const historyWindow = selectViewportItems(store.items, { columns: width, rows: historyRows - (store.scrollOffset > 0 ? 1 : 0), offset: store.scrollOffset });
+  const historyRows = Math.max(1, height - inputRows - 4);
+  useEffect(() => {
+    const task = setImmediate(() => {
+      const lines = [];
+      const renderRows = element => renderToString(h(Box, { width, flexDirection: 'column', flexShrink: 0 }, element), { columns: width }).split('\n');
+      if (streamingArea.length) lines.push(...renderRows(streamingArea));
+      let index = store.items.length - 1;
+      const needed = historyRows + store.scrollOffset;
+      while (index >= 0 && lines.length < needed) {
+        const item = store.items[index--];
+        let cached = rowCache.get(item);
+        if (!cached || cached.width !== width || cached.theme !== T) {
+          cached = { width, theme: T, lines: renderRows(h(StaticItem, { item, width })) };
+          rowCache.set(item, cached);
+        }
+        lines.unshift(...cached.lines);
+      }
+      store.scrollMax = index < 0 ? Math.max(0, lines.length - historyRows) : Number.MAX_SAFE_INTEGER;
+      store.scrollOffset = Math.min(store.scrollOffset, store.scrollMax);
+      setRendered(lines);
+    });
+    return () => clearImmediate(task);
+  }, [storeVersion, width, height, store]);
+  if (store.transcriptView) {
+    return h(Box, { flexDirection: 'column', height: '100%', width: '100%' },
+      h(TranscriptPanel, { view: store.transcriptView, width, height: Math.max(7, height - 3) }),
+      h(StatusBar, { store, model: modelLabel, providerKey: MODELS[state.activeModel]?.provider || 'unknown', processing: false, width, turnCount: store.turnCount }),
+    );
+  }
 
-  return h(Box, { flexDirection: 'column', width: '100%', height: '100%' },
-    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1, justifyContent: 'flex-start' },
-      store.scrollOffset > 0
-        ? h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `  ${uiText('Older messages', 'Mensajes anteriores')} · PgDn ${uiText('to return', 'para volver')}`)
-        : null,
-      historyWindow.map(item =>
-        h(Box, { key: item.id, flexDirection: 'column' },
-          h(StaticItem, { item, width }),
-        ),
-      ),
+  if (rendered === null) return h(Text, { color: T.accent }, '> ' + APP_NAME);
+  const offset = Math.min(store.scrollOffset, Math.max(0, rendered.length - historyRows));
+  const end = rendered.length - offset;
+  const visibleRows = rendered.slice(Math.max(0, end - historyRows + (offset > 0 ? 1 : 0)), end);
+
+  return h(Box, { flexDirection: 'column', width: '100%' },
+    h(Box, { flexDirection: 'column', flexShrink: 0 },
+      offset > 0 ? h(Text, { color: T.textGhost }, '  ' + uiText('Older messages · PgDn to return', 'Mensajes anteriores · PgDn para volver')) : null,
+      ...visibleRows.map((line, i) => h(Text, { key: String(i), wrap: 'truncate-end' }, line || ' ')),
     ),
-    streamingRows > 0 ? h(Box, { flexDirection: 'column', height: streamingRows, overflowY: 'hidden', flexShrink: 1 }, ...streamingArea) : null,
     ...controlArea,
     h(StatusBar, {
       store,

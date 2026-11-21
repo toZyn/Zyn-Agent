@@ -33,6 +33,6 @@ test('Markdown pipe tables and separators parse consistently', () => {
 test('agent tool events use concise status, not raw JSON', () => {
   const detail = JSON.stringify({ agent_id: 'b4f231bf-e618-47cd-a9b7-61415440db02', role: 'general', status: 'completed', task: 'Check hardware', result: 'Long private result' });
   const event = formatEventPreview({ kind: 'ok', title: 'Completed wait_agent', detail }, 52);
-  assert.deepEqual(event.lines, ['general · completed · b4f231bf']);
+  assert.deepEqual(event.lines, ['general · completed · b4f231bf', 'Long private result']);
   assert.equal(event.hint, '');
 });
