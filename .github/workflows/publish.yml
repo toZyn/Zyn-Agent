@@ -11,11 +11,14 @@ permissions:
 
 jobs:
   publish:
-    if: "github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'npm: validate trusted publishing v1.7.0'"
+    if: "github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'npm: validate trusted publishing v1.7.0 retry'"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v1.7.0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
