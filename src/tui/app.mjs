@@ -87,7 +87,7 @@ function useDimensions() {
 
 function parseInline(text) {
   const parts = [];
-  const regex = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(_(.+?)_)|(`([^`]+?)`)|(\[([^\]]+)\]\(([^)]+)\))|((?:https?:\/\/)[^\s<>"']+)/g;
+  const regex = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|((?<![\w])_(.+?)_(?![\w]))|(`([^`]+?)`)|(\[([^\]]+)\]\(([^)]+)\))|((?:https?:\/\/)[^\s<>"']+)/g;
   let lastIndex = 0;
   let match;
   while ((match = regex.exec(text)) !== null) {
@@ -111,21 +111,7 @@ function parseInline(text) {
 
 
 function normalizeAssistantDisplayText(text) {
-  const raw = String(text || '');
-  let trimmed = raw.trim();
-  if (!trimmed) return raw;
-
-  const parsed = parseAgentResponse(trimmed);
-  if (parsed?.type === 'tool') {
-    return '';
-  }
-  if (parsed?.type === 'final' && typeof parsed.content === 'string' && parsed.content.trim()) {
-    const content = parsed.content.trim();
-    if (content.startsWith('{') || content.startsWith('[')) return '';
-    return content.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-  }
-
-  return trimmed.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  return String(text || '');
 }
 
 function makeOsc8Link(text, url) {
@@ -242,9 +228,9 @@ function parseMarkdownBlocks(text) {
       flushParagraph();
       const items = [];
       while (i < lines.length) {
-        const current = lines[i].match(/^(\s*)\d+[.)]\s+(.+)/);
+        const current = lines[i].match(/^(\s*)(\d+)[.)]\s+(.+)/);
         if (!current) break;
-        items.push({ ordered: true, indent: Math.floor(current[1].length / 2), text: current[2].trim() });
+        items.push({ ordered: true, number: Number(current[2]), indent: Math.floor(current[1].length / 2), text: current[3].trim() });
         i += 1;
       }
       blocks.push({ type: 'list', items });
@@ -362,34 +348,21 @@ function MarkdownContent({ text, width, live }) {
         case 'list': {
           return h(Box, { key: String(i), flexDirection: 'column', paddingLeft: 0 },
             ...block.items.map((item, idx) => {
-              const bullet = item.ordered ? `${idx + 1}.` : '•';
-              const indent = '  '.repeat(item.indent || 0);
-              const wrapped = wrapText(item.text, Math.max(12, contentWidth - indent.length - 4));
-              return h(Box, { key: String(idx), flexDirection: 'column' },
-                h(Box, { flexWrap: 'wrap' },
-                  h(Text, { color: T.textMuted }, indent + bullet + ' '),
-                  h(InlineLine, { text: wrapped[0] || item.text }),
-                ),
-                ...wrapped.slice(1).map((part, partIdx) => h(Box, { key: String(partIdx), paddingLeft: indent.length + 2 }, h(Text, { color: T.textMuted }, part))),
+              const bullet = item.ordered ? `${item.number}.` : '•';
+              return h(Box, { key: String(idx), paddingLeft: (item.indent || 0) * 2, flexDirection: 'row' },
+                h(Text, { color: T.textMuted, flexShrink: 0 }, bullet + ' '),
+                h(Box, { flexDirection: 'column', flexGrow: 1, flexShrink: 1 }, h(InlineLine, { text: item.text })),
               );
             }),
           );
         }
-        case 'paragraph': {
-          const wrapped = wrapText(block.text, contentWidth);
-          return h(Box, { key: String(i), flexDirection: 'column', marginBottom: 0 },
-            ...wrapped.map((part, idx) => h(InlineLine, { key: String(idx), text: part })),
+        case 'paragraph':
+          return h(InlineLine, { key: String(i), text: block.text });
+        case 'quote':
+          return h(Box, { key: String(i), marginLeft: 1 },
+            h(Text, { color: T.textMuted, flexShrink: 0 }, '> '),
+            h(Box, { flexDirection: 'column', flexGrow: 1, flexShrink: 1 }, h(InlineLine, { text: block.text, color: T.textMuted })),
           );
-        }
-        case 'quote': {
-          const wrapped = wrapText(block.text, contentWidth - 2);
-          return h(Box, { key: String(i), marginLeft: 1, flexDirection: 'column' },
-            ...wrapped.map((part, idx) => h(Box, { key: String(idx) },
-              h(Text, { color: T.textMuted }, '> '),
-              h(InlineLine, { text: part, color: T.textMuted }),
-            )),
-          );
-        }
         case 'hr':
           return h(Text, { key: String(i), color: T.borderLight }, '─'.repeat(Math.max(10, Math.min(width || 80, 70))));
         case 'table': {
@@ -832,7 +805,11 @@ function StaticItem({ item, width }) {
     case 'divider':  return h(Box, { paddingLeft: 2 }, h(Text, { color: T.textInvis }, ' '));
     case 'user':     return h(UserMessage,   { text: item.text });
     case 'thinking': return h(ThinkingBlock, { text: item.text, elapsed: item.elapsed, width, expanded: item.expanded });
-    case 'answer':   return h(AnswerBlock,   { text: item.text, width });
+    case 'answer':   return h(AnswerBlock,   { text: item.text, live: item.live, width });
+    case 'comment':  return h(Box, { paddingLeft: width < 48 ? 1 : 3, paddingRight: 2, marginTop: 1 },
+      h(Text, { color: T.accent }, '› '),
+      h(Box, { flexDirection: 'column', flexGrow: 1, flexShrink: 1 }, h(MarkdownContent, { text: item.text, width: Math.max(1, width - 8), live: item.live })),
+    );
     case 'event':    return h(EventLine,     { kind: item.kind, title: item.title, detail: item.detail, width });
     case 'system':   return h(SystemMsg,     { text: item.text });
     case 'queued':   return h(QueuedMessage, { text: item.text });
@@ -1485,6 +1462,7 @@ export function App({ store, state, onSubmit }) {
 function getUiBindings(store, state) {
   const { countTokens, estimateContextTokens, getContextLimit } = require('../config');
   return {
+    upsertAssistantPart:    (_st, part) => store.upsertAssistantPart(part),
     beginThinkingStream:    () => store.beginThinking(),
     writeThinkingDelta:     (_st, delta) => store.appendThinking(delta),
     endThinkingStream:      () => store.endThinking(),

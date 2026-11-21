@@ -63,13 +63,35 @@ async function runChatGPTResponses(messages, modelId, onChunk, options = {}) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '', output = '', completed = false, bytes = 0, usage = null;
+  const items = new Map();
+  const fragments = new Map();
+  const saveItem = (item, index) => {
+    if (item.id) items.set(item.id, item);
+    if (index !== undefined) items.set(index, item);
+  };
+  const writePart = (event, value, replace = false) => {
+    const item = items.get(event.item_id) || items.get(event.output_index);
+    const id = String(event.item_id ?? item?.id ?? event.output_index ?? 'text') + ':' + (event.content_index ?? 0);
+    const phase = item?.phase || event.phase;
+    const previous = fragments.get(id);
+    const channel = item?.channel || event.channel || (phase === 'final_answer' ? 'final' : ['commentary', 'partial_answer'].includes(phase) ? 'commentary' : previous?.channel);
+    const text = replace ? String(value) : (previous?.text || '') + value;
+    if (previous?.text === text && previous.channel === channel) return;
+    fragments.set(id, { text, channel });
+    output = [...fragments.values()].map(part => part.text).join('\n\n');
+    if (onChunk) onChunk(replace ? text : value, 'answer', { id, channel, replace });
+  };
   const consume = chunk => {
     const event = parseSseFrame(chunk);
     if (!event) return;
-    if (event.type === 'response.output_text.delta') {
-      const delta = String(event.delta || '');
-      output += delta;
-      if (onChunk && delta) onChunk(delta, 'answer');
+    if (event.type === 'response.output_item.added' && event.item) saveItem(event.item, event.output_index);
+    if (event.type === 'response.output_text.delta') writePart(event, String(event.delta || ''));
+    if (event.type === 'response.output_text.done') writePart(event, String(event.text || ''), true);
+    if (event.type === 'response.output_item.done' && event.item) {
+      saveItem(event.item, event.output_index);
+      for (const [index, part] of (event.item.content || []).entries()) {
+        if (part.type === 'output_text') writePart({ item_id: event.item.id, output_index: event.output_index, content_index: index }, String(part.text || ''), true);
+      }
     }
     if (event.type === 'response.failed' || event.type === 'error') {
       throw new Error(String(event.response?.error?.message || event.error?.message || event.message || 'ChatGPT response failed').slice(0,300));

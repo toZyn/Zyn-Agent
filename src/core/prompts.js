@@ -815,27 +815,31 @@ function extractSimpleArgsTool(text, tool) {
 function parseAgentResponse(raw) {
   const text = normalizeText(raw);
 
-  // Support multiple JSONs separated by newlines (comment + action)
-  const comments = [];
-  const multiMatch = text.match(/^\{.*?\}\s*\n\s*\{/s);
-  if (multiMatch) {
-    const parts = text.split(/\n(?=\{)/).map(s => s.trim()).filter(Boolean);
-    for (let i = 0; i < parts.length - 1; i++) {
-      try {
-        const p = JSON.parse(parts[i]);
-        if (p?.type === 'comment' && typeof p.content === 'string') {
-          comments.push(p.content);
-        }
-      } catch {}
-    }
-    const last = parts[parts.length - 1];
-    const result = parseSingleAgentResponse(last);
-    if (result) {
-      result._comments = comments;
-      return result;
-    }
+  const { scanAssistantParts, classifyAssistantParts } = require('./response-protocol');
+  const rawParts = scanAssistantParts(text, { finished: true });
+  const parts = classifyAssistantParts(rawParts);
+  const comments = parts.filter(part => part.type === 'comment' && part.content.trim()).map(part => part.content.trim());
+  const action = rawParts.findLast(part => part.complete && (part.type === 'tool' || part.type === 'final'));
+  if (action?.record) {
+    const result = parseSingleAgentResponse(JSON.stringify(action.record)) || {
+      type: action.type, tool: action.record.tool, args: action.record.args || {}, content: action.record.content,
+    };
+    result._comments = comments;
+    return result;
+  }
+  if (rawParts.some(part => ['tool', 'final', 'incomplete'].includes(part.type) && !part.record)) {
+    return { type: 'invalid', error: 'The structured response is incomplete or invalid. Reissue one complete tool call or final response.', _comments: comments };
+  }
+  if (rawParts.some(part => part.type === 'comment') && !parts.some(part => part.type === 'answer')) {
+    return { type: 'comment', content: comments.join('\n\n'), _comments: comments };
   }
 
+  if (rawParts.length && rawParts.every(part => part.type === 'text')) {
+    try {
+      JSON.parse(text);
+      return { type: 'final', content: text };
+    } catch {}
+  }
   const result = parseSingleAgentResponse(text);
   if (result) {
     result._comments = comments.length > 0 ? comments : undefined;

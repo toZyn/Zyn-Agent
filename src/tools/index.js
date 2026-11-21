@@ -1717,7 +1717,7 @@ async function executeToolCall(call, state, ui, options = {}) {
   }
 
   const completionDesc = describeToolCall(call, state?.language);
-  let displayDetail = shortText(result, 100);
+  let displayDetail = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
   if (['spawn_agent', 'wait_agent', 'followup_agent', 'resume_agent', 'interrupt_agent', 'close_agent'].includes(call.tool)) {
     try {
       const record = JSON.parse(result);
@@ -1726,6 +1726,8 @@ async function executeToolCall(call, state, ui, options = {}) {
           agent_id: record.agent_id,
           role: record.role || 'agent',
           status: record.status || (record.closed ? 'closed' : 'started'),
+          result: record.result ?? null,
+          error: record.error ?? null,
         });
       }
     } catch {}

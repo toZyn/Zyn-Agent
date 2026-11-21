@@ -67,6 +67,30 @@ export class UIStore extends EventEmitter {
     this._emit();
   }
 
+  upsertAssistantPart(part) {
+    if (!part?.id || !['answer', 'comment'].includes(part.type)) throw new Error('Invalid assistant part');
+    const index = this.items.findIndex(item => item.id === part.id);
+    const previous = this.items[index];
+    if (previous && previous.text === part.text && previous.type === part.type && previous.live === part.live && previous.status === part.status) return;
+    const item = { ...part };
+    if (index < 0) this.items = [...this.items, item];
+    else this.items = this.items.map((current, i) => i === index ? item : current);
+    const elapsed = Date.now() - (this._lastPartEmit || 0);
+    if (!part.live || elapsed >= 50) {
+      clearTimeout(this._partTimer);
+      this._partTimer = null;
+      this._lastPartEmit = Date.now();
+      this._emit();
+    } else if (!this._partTimer) {
+      this._partTimer = setTimeout(() => {
+        this._partTimer = null;
+        this._lastPartEmit = Date.now();
+        this._emit();
+      }, 50 - elapsed);
+      this._partTimer.unref?.();
+    }
+  }
+
   scrollBy(delta) {
     const step = Number.isFinite(delta) ? Math.trunc(delta) : (delta > 0 ? (this.scrollMax ?? this.items.length) : -(this.scrollMax ?? this.items.length));
     const next = Math.max(0, Math.min((this.scrollMax ?? this.items.length - 1), this.scrollOffset + step));

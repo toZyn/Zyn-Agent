@@ -32,7 +32,7 @@ function splitRow(row) {
   const raw = trimmed.split(separator);
   if (raw[0].trim() === '') raw.shift();
   if (raw.at(-1)?.trim() === '') raw.pop();
-  return raw.map(value => value.trim());
+  return raw.map(value => value.trim().replace(/\*\*(.*?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/(?<![\w])_([^_]+)_(?![\w])/g, '$1'));
 }
 function separatorRow(row) {
   return row.every(value => /^:?-{3,}:?$/.test(value));
@@ -49,21 +49,13 @@ export function formatTerminalTable(rawRows, width = 80) {
   if (total <= max) {
     return { mode: 'columns', lines: padded.map(row => row.map((cell, i) => pad(cell, widths[i])).join(' │ ')) };
   }
-  if (count > 3 || max < count * 7 + spacing) {
-    const headers = padded[0];
-    return {
-      mode: 'cards',
-      lines: padded.slice(1).flatMap((row, index) => [
-        ...(index ? [''] : []),
-        ...row.map((cell, i) => clip(headers[i] || 'Column ' + (i + 1), Math.min(14, max - 5)) + ': ' + cell),
-      ]),
-    };
-  }
-  const allocated = widths.map(w => Math.max(5, Math.floor((max - spacing) * (w / (total - spacing)))));
-  while (allocated.reduce((sum, n) => sum + n, 0) + spacing > max) {
-    const longest = allocated.indexOf(Math.max(...allocated));
-    allocated[longest]--;
-  }
-  return { mode: 'columns', lines: padded.map(row => row.map((cell, i) => pad(cell, allocated[i])).join(' │ ')) };
+  const headers = padded[0];
+  return {
+    mode: 'cards',
+    lines: padded.slice(1).flatMap((row, index) => [
+      ...(index ? [''] : []),
+      ...row.map((cell, i) => (headers[i] || 'Column ' + (i + 1)) + ': ' + cell),
+    ]),
+  };
 }
 export { displayWidth };

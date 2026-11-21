@@ -14,6 +14,7 @@ const {
   stripBase64Images,
 } = require('../config');
 const { chat } = require('../providers/scraperClient');
+const { AssistantStream } = require('./assistant-stream');
 const {
   KNOWN_TOOLS,
   buildConversationMessages,
@@ -71,32 +72,25 @@ async function requestModel(messages, state, ui, options = {}) {
       throw new Error(state.language === 'es' ? 'Agente detenido por el usuario' : 'Agent stopped by user');
     }
     const stopThinking = ui.startThinkingIndicator(state, attempt === 0 ? label : `${label} (${state.language === 'es' ? 'reintento' : 'retry'})`);
-    let answerStarted = false;
     let thinkingStarted = false;
     let hasFollowedUp = false;
     const controller = new AbortController();
-    const onExternalAbort = () => controller.abort();
+    const onExternalAbort = () => { stopThinking(); controller.abort(); };
+    const assistantStream = new AssistantStream(state, ui, streamOutput, stopThinking);
 
     if (signal) {
       if (signal.aborted) { stopThinking(); controller.abort(); }
       else {
-        signal.addEventListener('abort', () => {
-          stopThinking();
-          controller.abort();
-        }, { once: true });
+        signal.addEventListener('abort', onExternalAbort, { once: true });
       }
     }
 
     try {
-      let answerChunks = '';
-      let requestStreamText = '';
-      let streamStarted = false;
-      let assistantRendered = false;
       const result = await chat({
         messages,
         modelKey: state?.activeModel || DEFAULT_MODEL_KEY,
         signal: controller.signal,
-        onChunk: (delta, phase) => {
+        onChunk: (delta, phase, metadata) => {
           if (phase === 'thinking') {
             if (!thinkingStarted) {
               stopThinking();
@@ -106,34 +100,13 @@ async function requestModel(messages, state, ui, options = {}) {
             ui.writeThinkingDelta(state, delta);
             return;
           }
-          if (thinkingStarted && !streamStarted) {
+          if (thinkingStarted) {
             ui.endThinkingStream(state);
             thinkingStarted = false;
           }
-          answerChunks += delta;
-
-          const visible = require('./stream-text').assistantStreamText(answerChunks);
-          if (visible === null) return;
-          if (!streamStarted && visible) {
-            stopThinking();
-            if (streamOutput) ui.beginAssistantStream(state);
-            streamStarted = true;
-            answerStarted = true;
-          }
-          if (streamOutput && streamStarted) {
-            const previous = requestStreamText;
-            if (visible.startsWith(previous)) {
-              const chunk = visible.slice(previous.length);
-              if (chunk) ui.writeAssistantDelta(state, chunk);
-              assistantRendered = assistantRendered || Boolean(chunk);
-              requestStreamText = visible;
-            }
-          }
+          assistantStream.append(delta, metadata);
         },
       });
-      if (streamOutput && streamStarted) {
-        assistantRendered = Boolean(ui.endAssistantStream(state)) || assistantRendered;
-      }
       ui.pushAction(state, 'ok', state.language === 'es' ? 'Respuesta recibida' : 'Answer received');
       const rawAnswer = result.answer ?? '';
       const rawThinking = result.thinking || '';
@@ -155,28 +128,20 @@ async function requestModel(messages, state, ui, options = {}) {
             messages: followUpMessages,
             modelKey: state?.activeModel || DEFAULT_MODEL_KEY,
             signal: controller.signal,
-            onChunk: streamOutput ? (delta, phase) => {
-              if (phase === 'answer') {
-                if (!answerStarted) {
-                  ui.beginAssistantStream(state);
-                  answerStarted = true;
-                  streamStarted = true;
-                }
-                ui.writeAssistantDelta(state, delta);
-              }
-            } : null,
+            onChunk: (delta, phase, metadata) => {
+              if (phase === 'answer') assistantStream.append(delta, metadata);
+            },
           });
           if (followUp.answer) {
-            if (streamOutput && answerStarted) {
-              assistantRendered = Boolean(ui.endAssistantStream(state)) || assistantRendered;
-            }
-            return { answer: followUp.answer, thinking: rawThinking, usage: followUp.usage || result.usage || null, rendered: assistantRendered };
+            return { answer: followUp.answer, thinking: rawThinking, usage: followUp.usage || result.usage || null, ...assistantStream.finish(followUp.answer) };
           }
         } catch {}
       }
 
-      return { answer: rawAnswer, thinking: rawThinking, usage: result.usage || null, rendered: assistantRendered };
+      return { answer: rawAnswer, thinking: rawThinking, usage: result.usage || null, ...assistantStream.finish(rawAnswer) };
     } catch (err) {
+      assistantStream.interrupt();
+      if (assistantStream.hasVisibleOutput) throw err;
       const externalAbort = Boolean(signal?.aborted);
       const aborted = controller.signal.aborted || err?.name === 'AbortError';
       if (aborted) throw new Error(state.language === 'es' ? 'Tiempo agotado' : 'Timeout');
@@ -228,7 +193,6 @@ async function requestModel(messages, state, ui, options = {}) {
       if (signal) signal.removeEventListener('abort', onExternalAbort);
       stopThinking();
       if (thinkingStarted) ui.endThinkingStream(state);
-      if (streamOutput && answerStarted) ui.endAssistantStream(state);
     }
   }
   throw new Error(state.language === 'es' ? 'Proveedor inalcanzable' : 'Provider unreachable');
@@ -306,7 +270,7 @@ async function persistSessionState(state, ui) {
   await saveState(state);
 }
 
-async function answerFromToolResult(input, call, result, state, ui, language) {
+async function answerFromToolResult(input, call, result, state, ui, language, signal) {
   const systemPrompt = buildSystemPrompt(state.cwd, state, { input, language });
   const turnMessages = [
     { role: 'user', content: input },
@@ -316,10 +280,12 @@ async function answerFromToolResult(input, call, result, state, ui, language) {
   const messages = buildConversationMessages(state, turnMessages, systemPrompt);
   const output = await requestModel(messages, state, ui, {
     label: language === 'es' ? 'Procesando resultado' : 'Processing result',
+    streamOutput: Boolean(state.tuiConfirm),
+    signal,
   });
-  const parsed = parseAgentResponse(output.answer || '');
-  const answer = parsed.type === 'final' ? normalizeText(parsed.content) : normalizeText(output.answer || '');
-  return answer || (language === 'es' ? '(procesado)' : '(processed)');
+  const parsed = output.parsed || parseAgentResponse(output.answer || '');
+  const answer = parsed.type === 'final' ? String(parsed.content || '').trim() : '';
+  return { content: answer || (language === 'es' ? '(procesado)' : '(processed)'), rendered: Boolean(output.rendered) };
 }
 
 async function runAgentTurn(input, state, ui, options = {}) {
@@ -338,11 +304,12 @@ async function runAgentTurn(input, state, ui, options = {}) {
     const result = await executeToolCall(directAction, state, ui, { signal });
     const cleanResult = stripBase64Images(String(result || ''));
     await appendTranscriptEntry(state.sessionId, { type: 'tool', tool: directAction.tool, args: directAction.args, result: cleanResult });
-    const finalAnswer = await answerFromToolResult(input, directAction, cleanResult, state, ui, turnLanguage);
+    const answer = await answerFromToolResult(input, directAction, cleanResult, state, ui, turnLanguage, signal);
+    const finalAnswer = answer.content;
     state.history.push({ role: 'user', content: input }, { role: 'assistant', content: finalAnswer });
     await appendTranscriptEntry(state.sessionId, { type: 'assistant', content: finalAnswer });
     await persistSessionState(state, ui);
-    return { content: finalAnswer, rendered: true };
+    return { content: finalAnswer, rendered: answer.rendered };
   }
 
   const turnMessages = [{ role: 'user', content: input }];
@@ -396,9 +363,9 @@ async function runAgentTurn(input, state, ui, options = {}) {
       state.lastTokenUsage = rawUsage;
       if (typeof ui.setTokenUsage === 'function') ui.setTokenUsage(rawUsage);
     }
-    let parsed = parseAgentResponse(rawAnswer || '');
+    let parsed = raw.parsed || parseAgentResponse(rawAnswer || '');
 
-    if (parsed._comments && parsed._comments.length > 0) {
+    if (!raw.commentsRendered && parsed._comments && parsed._comments.length > 0) {
       for (const comment of parsed._comments) {
         if (typeof ui.logEvent === 'function') {
           ui.logEvent(state, 'comment', comment);
@@ -406,6 +373,21 @@ async function runAgentTurn(input, state, ui, options = {}) {
           console.log(`\n  › ${comment}`);
         }
       }
+    }
+
+    if (parsed.type === 'invalid') {
+      turnMessages.push({ role: 'user', content: parsed.error });
+      if (toolProgressGuard.observe({ tool: 'invalid_response', args: {} }, rawAnswer)) return await finishNoProgress();
+      step++;
+      continue;
+    }
+
+    if (parsed.type === 'comment') {
+      turnMessages.push({ role: 'assistant', content: JSON.stringify({ type: 'comment', content: parsed.content }) });
+      turnMessages.push({ role: 'user', content: turnLanguage === 'es' ? 'Continúa con la siguiente herramienta o con el resultado final. No repitas el comentario.' : 'Continue with the next tool or the final result. Do not repeat the commentary.' });
+      if (toolProgressGuard.observe({ tool: 'comment', args: {} }, parsed.content)) return await finishNoProgress();
+      step++;
+      continue;
     }
 
     if (parsed.tool && !KNOWN_TOOLS.has(parsed.tool)) {
