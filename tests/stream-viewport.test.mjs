@@ -20,3 +20,12 @@ test('multiple wrapped rows count towards the streaming viewport height',()=>{
   const source='A'.repeat(120)+'\nLatest entry';
   assert.equal(visibleStreamTail(source,20,3),'Latest entry');
 });
+
+
+test('one unbroken streaming line still keeps its latest visible characters',()=>{
+  const long='Z'.repeat(400)+'LATEST';
+  const shown=visibleStreamTail(long,18,4);
+  assert.ok(shown.startsWith('…'));
+  assert.ok(shown.endsWith('LATEST'));
+  assert.ok(shown.length<80);
+});

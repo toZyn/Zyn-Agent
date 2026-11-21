@@ -284,7 +284,10 @@ class SubagentCoordinator {
 
   async followup(id, task) {
     const agent = this.lookup(id);
-    if (agent.status === 'running') throw new Error('Wait for the current subagent turn to finish.');
+    if (agent.status === 'interrupted' && agent.role === 'general') {
+      throw new Error('Interrupted writable agents must use resume_agent with explicit user approval.');
+    }
+    if (agent.status === 'running' || agent.promisePending) throw new Error('Wait for the current subagent turn to finish.');
     if (typeof task !== 'string' || !task.trim() || task.length > MAX_TASK_LENGTH) throw new Error('Invalid follow-up task.');
     return this.startTurn(agent, task);
   }

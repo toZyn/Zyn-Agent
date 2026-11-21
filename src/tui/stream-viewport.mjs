@@ -9,7 +9,20 @@ export function visibleStreamTail(text, columns = 80, maxRows = 12) {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     const rows = Math.max(1, Math.ceil(displayWidth(line) / width));
-    if (used + rows > limit && picked.length) break;
+    if (used + rows > limit) {
+      if (picked.length) break;
+      const available = Math.max(1, limit * width - 1);
+      const tail = [];
+      let cells = 0;
+      for (const part of Array.from(line).reverse()) {
+        const size = displayWidth(part);
+        if (cells + size > available) break;
+        tail.push(part);
+        cells += size;
+      }
+      picked.unshift('…' + tail.reverse().join(''));
+      break;
+    }
     picked.unshift(line);
     used += rows;
     if (used >= limit) break;

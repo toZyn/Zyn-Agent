@@ -29,6 +29,7 @@ test('running child is recoverable as interrupted after a process restart',async
     return {content:'Done: '+task};
   });
   assert.equal(restored.lookup(initial.agent_id).status,'interrupted');
+  await assert.rejects(restored.followup(initial.agent_id,'Another action'),/resume_agent/);
   const running=restored.resume(initial.agent_id);
   assert.equal(running.status,'running');
   const done=await restored.wait(initial.agent_id,1000);
