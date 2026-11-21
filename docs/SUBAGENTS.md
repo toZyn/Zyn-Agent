@@ -1,6 +1,6 @@
 # Subagents in Zyn Agent
 
-This document describes the development-branch implementation and the public reference architectures it was compared against. It does not claim feature parity.
+This document describes the implementation released in Zyn Agent v1.8.0 and the public reference architectures it was compared against. It does not claim feature parity.
 
 ## Reference behavior
 

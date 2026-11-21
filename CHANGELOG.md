@@ -1,37 +1,42 @@
-# Zyn Agent v1.7.0
+# Zyn Agent v1.8.0
 
-A feature release focused on reliable terminal workflows, account connections, meaningful command behavior and provider presentation. It includes the changes developed since v1.6.0.
+Released 2026-11-21. This release adds persistent subagents and restores Zyn's compact terminal presentation while preserving complete, scrollable output.
 
-### Agent commands and developer workflow
+### Persistent subagents
 
-- Added `/doctor`, `/tools`, `/plan on|off`, `/permissions`, `/init`, `/diff`, `/context`, `/stats`, `/usage`, `/version`, `/account`, `/login` and `/logout`, with actionable output rather than placeholder screens.
-- `/model` now opens the existing selector or switches to a given model ID. `/help <command>` explains individual commands. `/clear` and `/quit` are discoverable aliases.
-- Added non-interactive `zyn --version`, `zyn help`, `zyn doctor`, `zyn models`, `zyn sessions`, `zyn tools` and expanded `zyn auth` operations. These do not invoke a language model.
-- Enforced read-only plan mode at the tool dispatcher. `/stats` and `/usage` show observed session counts and clearly labeled text-based estimates, never fabricated billing information.
+- Added spawning, waiting, listing, follow-up, interruption, resumption and closing of child agents, plus `/agents` controls.
+- Added independent child histories and transcripts, saved specialist definitions, parent/peer messaging and persisted coordinator state.
+- Added read-only explore/review/plan roles and a general worker, with explicit permissions and up to three active children per parent.
+- Interrupted read-only tasks can recover after restart. Writable tasks require explicit resumption and reconciliation of any work already performed.
+- Workers share the process and workspace; they are not operating-system sandboxes or automatically isolated worktrees. Live provider behavior is not established by the offline tests.
 
-### ChatGPT account integration (preview)
+### Terminal presentation and streaming
 
-- Added independent, consent-based Sign in with ChatGPT using OAuth 2.0 Authorization Code + PKCE and OpenID Connect. No Codex CLI, manually configured client ID/secret, exported Codex cookies or API key is needed for eligible users.
-- Retrieves account-visible models with the official `/v1/models` endpoint and streams inference through `/v1/responses` with `store: false`.
-- Protects account login through state, nonce, cryptographic ID-token validation, restricted local credential files, rotating refresh tokens and cross-process refresh locking.
-- Supports `zyn auth chatgpt login|status|models|logout`, plus `/auth chatgpt ...` in the TUI and model selection via `/providers`.
-- **Limit:** automated tests use mock credentials and mocked API responses. A real-account login and end-to-end model test is still outstanding, and access depends on OpenAI's eligibility, consent and usage limits.
+- Restored the original framed banner, semantic colors and inline tool-event markers. Removed oversized AGENT cards.
+- Removed the two-line tool-output preview cap and the automatic eviction of conversation items after 400 messages.
+- Added scrolling by actual rendered rows, including within one long answer, and wrapping at the current terminal width.
+- Removed the fixed half-screen streaming reservation so short output and input stay close together.
+- Fixed inline Markdown text flow and incremental final-answer decoding, including JSON escapes, without displaying tool/comment JSON as answer text.
+- Made the Zyn model selector open the available catalog immediately instead of blocking queued commands on a network refresh.
+- Improved mobile resizing, transcript viewing, approval panels, onboarding and memory-import recovery.
 
-### Integrations and interface
+### Context and account reporting
 
-- GitHub API calls can reuse an authenticated official `gh` CLI without exporting its token. `zyn auth github login|status|logout` provides the corresponding account workflow.
-- Gmail can reuse the official `gws` authentication for supported operations, and supports `zyn auth gmail login|status|logout`. Google Workspace may require its own OAuth client setup; it is not magically bypassed.
-- Added the black-and-white Zyn logo, compact provider marks, and clearer provider labels for terminals.
-- Improved command documentation, error handling and diagnostics.
+- Disabled arbitrary default tool-step, history-character and tool-result-character caps; explicitly configured caps still work.
+- Retained the identical-result no-progress guard. Provider limits, timeouts and available resources still apply.
+- Use provider-reported context sizes when available and show unknown sizes as unknown. Distinguish estimated text tokens from measured provider usage.
+- Consolidated account/provider status for ChatGPT, GitHub and Gmail.
 
-### Reliability and testing
+### Validation
 
-- Added command regression tests, full TUI tests, authentication/refresh/streaming tests and a reproducible benchmark.
-- Baseline 10,000-message TUI benchmark on the test environment: approximately 11.4 seconds for the insert workload, 140 MB RSS, zero full-screen clears and successful scroll/exit. Measurements are workload- and device-dependent, not a comparative claim against other agents.
-- GitHub Releases and npm publication are now **independent**. This release does not publish to npm, which requires a separately initiated manual workflow.
+- Passed 153 Node tests and 43 pseudo-terminal scenarios on the final implementation.
+- Added a visual regression that checks a completed subagent alongside a partial streamed answer, resizing from 62 to 48 to 90 columns while generation is active.
+- Verified complete long tool outputs, long single-answer navigation, model-selector cancellation, child dispatch, persistence and restart recovery.
+- A 10,000-message terminal workload completed in approximately 11.8 seconds at 243 MB RSS, with zero full-screen clears and successful scrolling and exit. These measurements depend on device and workload.
+- Tests use simulated provider responses; real-provider response quality and repetition remain outside this offline validation.
 
-### Known limitations
+### Distribution
 
-- No general multi-agent orchestration framework, plugin isolation sandbox or lifecycle hook engine is claimed.
-- OAuth on a remote server needs a safe way for the browser to reach the loopback callback.
-- Exact provider billing/quota cannot be inferred from approximate session token counts.
+Creating this GitHub release does not publish to npm. npm publication is a separate, manually initiated workflow.
+
+Previous release: [v1.7.0](https://github.com/toZyn/Zyn-Agent/releases/tag/v1.7.0).
