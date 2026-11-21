@@ -32,3 +32,9 @@ Zyn-Agent is a Node.js agent with a command-line interface, an Ink/React termina
 ## Boundaries not yet migrated
 
 `src/tui/app.mjs` still contains application-specific command handlers. `src/cli/commands.js`, `src/tools/index.js`, and the prompt definitions remain large modules. Further extraction should proceed by domain with regression tests, not through simultaneous wholesale rewrites. Model streaming, remote tools, plugin isolation and provider failures require dedicated integration coverage.
+
+## Scrolling and render performance
+
+Ink 7 does not provide native `scrollable` or `mouse` attributes on `Box`. The application uses a height-limited virtual history viewport, renders only items fitting the visible row budget, and clips the live streaming area to keep the input and status bar on screen. PageUp/PageDown scroll through prior history; xterm mouse-wheel events are decoded from SGR mouse reports; the input editor ignores those reports. The scroll offset stays anchored when new items arrive, up to the viewport retention limit.
+
+Long slash-command output is split into smaller system items so it remains navigable rather than creating one oversized, clipped result. Only the last 400 UI items stay in memory; persistent sessions and transcripts are not modified by UI scrolling. Single unusually long messages may still be clipped within one item and deserve a separate text-pagination improvement.

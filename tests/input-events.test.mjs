@@ -51,3 +51,11 @@ test('bracketed paste never becomes multiple submitted commands', async () => {
   const { splitSubmittedInput } = await import('../src/tui/input-events.mjs');
   assert.equal(splitSubmittedInput('\x1b[200~/help\n/exit\x1b[201~', {}), null);
 });
+
+test('SGR mouse wheel input parses up/down without interpreting clicks as scroll', async () => {
+  const { mouseWheelSteps } = await import('../src/tui/input-events.mjs');
+  assert.equal(mouseWheelSteps('\x1b[<64;12;4M'), 1);
+  assert.equal(mouseWheelSteps('\x1b[<65;12;4M'), -1);
+  assert.equal(mouseWheelSteps('\x1b[<65;12;4M\x1b[<65;12;4M'), -2);
+  assert.equal(mouseWheelSteps('\x1b[<0;12;4M'), 0);
+});

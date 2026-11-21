@@ -105,6 +105,7 @@ https://github.com/user-attachments/assets/a66690d6-db83-4d5a-8482-d0af98a8b7e4
 - **24 built-in themes** — dark, light, gruvbox, dracula, nord, solarized, monokai, tokyo-night, matrix, cyberpunk, vaporwave, rosePine, catppuccin, and more
 - **Dynamic theme chooser** — `/theme` opens interactive picker with preview
 - **Responsive** — adapts to any terminal width, listens to resize events
+- **Scrollable history** — PageUp/PageDown or mouse wheel navigates previous messages; streaming output is clipped within the viewport to keep controls visible
 - **No emojis** — clean text UI with symbols (`>`, `·`, `x`)
 
 ### Plugin System

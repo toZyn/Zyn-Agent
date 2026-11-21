@@ -13,6 +13,7 @@ export class UIStore extends EventEmitter {
     this.uiText = uiText;
     this.setMaxListeners(50);
     this.items = [];
+    this.scrollOffset = 0;
     this.liveThinking = null;
     this.liveAnswer = null;
     this.spinner = null;
@@ -58,7 +59,21 @@ export class UIStore extends EventEmitter {
   addItem(item) {
     this._idCounter += 1;
     this.items = appendVisibleItem(this.items, { ...item, id: String(this._idCounter) });
+    if (this.scrollOffset > 0) this.scrollOffset = Math.min(this.items.length - 1, this.scrollOffset + 1);
     this._emit();
+  }
+
+  scrollBy(delta) {
+    const step = Number.isFinite(delta) ? Math.trunc(delta) : (delta > 0 ? this.items.length : -this.items.length);
+    const next = Math.max(0, Math.min(this.items.length - 1, this.scrollOffset + step));
+    if (next !== this.scrollOffset) {
+      this.scrollOffset = next;
+      this._emit();
+    }
+  }
+
+  scrollToBottom() {
+    this.scrollBy(-Infinity);
   }
 
   setSpinner(label) {

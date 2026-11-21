@@ -17,7 +17,7 @@ ANSI = re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[PX^_].
 
 
 class Terminal:
-    def __init__(self, cols=80, rows=24):
+    def __init__(self, cols=80, rows=24, command=None, env_extra=None):
         self.tmp = tempfile.TemporaryDirectory(prefix='zyn-tui-test-')
         self.master, slave = pty.openpty()
         self._winsize(slave, cols, rows)
@@ -25,10 +25,14 @@ class Terminal:
         env.pop('NO_COLOR', None)
         env.pop('FORCE_COLOR', None)
         env.update({'TERM': 'xterm-256color', 'ZYN_DATA_DIR': self.tmp.name})
-        self.proc = subprocess.Popen(['node', 'zyn.js'], cwd=ROOT, stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True)
+        if env_extra: env.update(env_extra)
+        self.proc = subprocess.Popen(command or ['node', 'zyn.js'], cwd=ROOT, stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True)
         os.close(slave)
         self.capture = bytearray()
-        self.read(0.7)
+        self.read(0.3)
+        deadline = time.monotonic() + 6
+        while b'\xe2\x9d\xaf' not in self.capture and self.proc.poll() is None and time.monotonic() < deadline:
+            self.read(0.1)
 
     def _winsize(self, fd, cols, rows):
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
@@ -94,7 +98,7 @@ class TuiIntegrationTests(unittest.TestCase):
 
     def test_help_and_exit_in_rapid_events(self):
         self.term.send(b'/help\r', 0.6)
-        self.assertIn('usage', self.term.text.lower())
+        self.assertIn('zyncloud', self.term.text.lower())
         self.term.send(b'/exit\r', 0.3)
         self.assertEqual(self.term.wait_exit(), 0)
 

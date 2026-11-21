@@ -1,10 +1,11 @@
+import { splitSystemOutput } from './output.mjs';
 import { UIStore } from './store.mjs';
 import { getTheme, SPIN_FRAMES } from './themes.mjs';
 import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
-import { appendVisibleItem } from './viewport.mjs';
+import { selectViewportItems } from './viewport.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
-import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor } from './input-events.mjs';
+import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor, mouseWheelSteps } from './input-events.mjs';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { render, Box, Text, useInput, useApp, useStdout } from 'ink';
 import { createRequire } from 'module';
@@ -649,13 +650,13 @@ function ConfirmBar({ title, detail, lastMessage, draft }) {
   );
 }
 
-function SelectBar({ request, width }) {
+function SelectBar({ request, width, height = 24 }) {
   if (!request) return null;
   const items = Array.isArray(request.items) ? request.items : [];
   const total = items.length;
   const w = width || 100;
   const compact = layoutForWidth(w).compact;
-  const maxVisible = Math.max(5, Math.min(20, Math.floor(w / 5)));
+  const maxVisible = Math.max(1, Math.min(20, Math.floor(w / 5), height - 12));
   const safeIdx = Math.max(0, Math.min(request.selected || 0, total - 1));
   const half = Math.floor(maxVisible / 2);
   let start = Math.max(0, safeIdx - half);
@@ -845,7 +846,7 @@ function isBackspaceInput(input, key) {
   return Boolean(key?.backspace || key?.delete || input === '\b' || input === '\x7f' || input === '\u0008');
 }
 
-function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange }) {
+function InputBar({ onSubmit, processing, width = 100, height = 24, draft = '', onDraftChange }) {
   const [value, setValue] = useState(draft || '');
   const [cursor, setCursor] = useState((draft || '').length);
   const [histIdx, setHistIdx] = useState(-1);
@@ -905,6 +906,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
     : [];
 
   useInput((input, key) => {
+    if (/(?:\x1b)?\[<\d+;\d+;\d+[Mm]/.test(input)) return;
     const currentValue = valueRef.current;
     const currentCursor = cursorRef.current;
     const currentShowSuggestions = currentValue.startsWith('/') && !currentValue.includes(' ') && currentValue.length > 0;
@@ -1113,7 +1115,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
 
   if (suggestions.length === 0) return inputLine;
 
-  const maxVisible = 8;
+  const maxVisible = Math.max(1, Math.min(8, height - 8));
   const safeIdx = Math.min(suggestIdx, suggestions.length - 1);
   const windowStart = Math.max(0, Math.min(safeIdx - maxVisible + 1, suggestions.length - maxVisible));
   const visible = suggestions.slice(windowStart, windowStart + maxVisible);
@@ -1149,12 +1151,26 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
   );
 }
 
-function App({ store, state, onSubmit }) {
+export function App({ store, state, onSubmit }) {
   useStore(store);
   global.__zynCurrentLanguage = state?.language || 'en';
   const { exit } = useApp();
-  const { width } = useDimensions();
+  const { width, height } = useDimensions();
   const themeVersion = store.themeVersion;
+
+  useEffect(() => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
+    const onMouse = chunk => {
+      const steps = mouseWheelSteps(chunk);
+      if (steps) store.scrollBy(steps * 3);
+    };
+    process.stdin.on('data', onMouse);
+    process.stdout.write('\x1b[?1000h\x1b[?1006h');
+    return () => {
+      process.stdin.off('data', onMouse);
+      process.stdout.write('\x1b[?1000l\x1b[?1006l');
+    };
+  }, [store]);
 
   const modelKey   = state?.activeModel || DEFAULT_MODEL_KEY;
   const modelLabel = (MODELS[modelKey]?.label || modelKey).toLowerCase();
@@ -1173,6 +1189,7 @@ function App({ store, state, onSubmit }) {
   }, [onSubmit, exit, store]);
 
   useInput((input, key) => {
+    if (/(?:\x1b)?\[<\d+;\d+;\d+[Mm]/.test(input)) return;
     if (key.ctrl && input === 'c') {
       try {
         const { saveState } = require('../utils/sessionStorage');
@@ -1272,7 +1289,14 @@ function App({ store, state, onSubmit }) {
       }
       return;
     }
-    if (!store.confirmRequest) return;
+    if (!store.confirmRequest) {
+      const page = Math.max(1, Math.floor((height - 6) / 2));
+      if (key.pageUp || (key.ctrl && key.upArrow)) { store.scrollBy(page); return; }
+      if (key.pageDown || (key.ctrl && key.downArrow)) { store.scrollBy(-page); return; }
+      if (key.ctrl && key.home) { store.scrollBy(Infinity); return; }
+      if (key.ctrl && key.end) { store.scrollToBottom(); return; }
+      return;
+    }
     if (input === 'y' || input === 's') store.resolveConfirm(true);
     else if (input === 'n' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
   });
@@ -1282,16 +1306,17 @@ function App({ store, state, onSubmit }) {
   const showSelect  = !!store.selectRequest;
   const showPrompt  = !!store.inputRequest;
 
-  const dynamicArea = [];
+  const streamingArea = [];
+  const controlArea = [];
 
   if (store.spinner && !store.liveThinking) {
-    dynamicArea.push(
+    streamingArea.push(
       h(SpinnerLine, { key: 'spinner', label: store.spinner.label, started: store.spinner.started })
     );
   }
 
   if (store.liveThinking) {
-    dynamicArea.push(
+    streamingArea.push(
       h(ThinkingBlock, { key: 'thinking', text: store.liveThinking.text, live: true, width })
     );
   }
@@ -1299,45 +1324,59 @@ function App({ store, state, onSubmit }) {
   if (store.liveAnswer) {
     const liveText = normalizeAssistantDisplayText(store.liveAnswer.text);
     if (liveText) {
-      dynamicArea.push(
+      streamingArea.push(
         h(AnswerBlock, { key: 'answer', text: liveText, live: true, width })
       );
     }
   }
 
   if (showConfirm) {
-    dynamicArea.push(
+    controlArea.push(
       h(ConfirmBar, { key: 'confirm', title: store.confirmRequest.title, detail: store.confirmRequest.detail, lastMessage: store.lastUserMessage, draft: store.inputDraft })
     );
   }
 
   if (showSelect) {
-    dynamicArea.push(
-      h(SelectBar, { key: 'select', request: store.selectRequest, width })
+    controlArea.push(
+      h(SelectBar, { key: 'select', request: store.selectRequest, width, height })
     );
   }
 
   if (showPrompt) {
-    dynamicArea.push(
+    controlArea.push(
       h(PromptBar, { key: 'prompt', request: store.inputRequest, width })
     );
   }
 
   if (showInput) {
-    dynamicArea.push(
-      h(InputBar, { key: 'input', onSubmit: handleInput, processing: store.processing, width, draft: store.inputDraft, onDraftChange: (text) => store.setInputDraft(text) })
+    controlArea.push(
+      h(InputBar, { key: 'input', onSubmit: handleInput, processing: store.processing, width, height, draft: store.inputDraft, onDraftChange: (text) => store.setInputDraft(text) })
     );
   }
 
+  const streamingRows = store.liveAnswer || store.liveThinking
+    ? Math.max(2, Math.floor((height - 6) / 2))
+    : store.spinner ? 2 : 0;
+  const modalRows = showSelect
+    ? Math.max(7, Math.min(20, Math.floor(width / 5), height - 12) + 5)
+    : showPrompt ? 6 : showConfirm ? 5 : 0;
+  const inputRows = showInput ? (store.inputDraft.startsWith('/') ? Math.min(10, Math.max(2, height - 5)) : 2) : modalRows;
+  const historyRows = Math.max(1, height - inputRows - streamingRows - 4);
+  const historyWindow = selectViewportItems(store.items, { columns: width, rows: historyRows - (store.scrollOffset > 0 ? 1 : 0), offset: store.scrollOffset });
+
   return h(Box, { flexDirection: 'column', width: '100%', height: '100%' },
-    h(Box, { flexDirection: 'column', flexGrow: 1, scrollable: true, mouse: true },
-      store.items.map(item =>
+    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1 },
+      store.scrollOffset > 0
+        ? h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `  ${uiText('Older messages', 'Mensajes anteriores')} · PgDn ${uiText('to return', 'para volver')}`)
+        : null,
+      historyWindow.map(item =>
         h(Box, { key: item.id, flexDirection: 'column' },
           h(StaticItem, { item, width }),
         ),
       ),
-      ...dynamicArea,
     ),
+    streamingRows > 0 ? h(Box, { flexDirection: 'column', height: streamingRows, overflowY: 'hidden', flexShrink: 1 }, ...streamingArea) : null,
+    ...controlArea,
     h(StatusBar, {
       store,
       model: modelLabel,
@@ -1876,7 +1915,7 @@ export async function startTUI(options = {}) {
         const handled = await handleLocalCommand(input, state, deps);
         if (handled && lines.length > 0) {
           const clean = lines.filter(l => l.trim()).join('\n');
-          if (clean) store.addItem({ type: 'system', text: clean });
+          if (clean) for (const item of splitSystemOutput(clean)) store.addItem(item);
         }
         if (!handled) store.addEvent('warn', uiText('command not recognized', 'comando no reconocido'), input);
       } catch (err) {

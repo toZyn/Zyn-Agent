@@ -58,3 +58,14 @@ export function splitSubmittedInput(input, key = {}) {
   const cleaned = part => sanitizeInputChunk(part).replace(/\n+/g, ' ');
   return { complete: parts.slice(0, -1).map(cleaned), rest: cleaned(parts.at(-1)) };
 }
+
+export function mouseWheelSteps(input) {
+  const pattern = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+  let steps = 0;
+  for (const match of String(input ?? '').matchAll(pattern)) {
+    const button = Number(match[1]);
+    if ((button & 64) !== 64) continue;
+    steps += (button & 1) ? -1 : 1;
+  }
+  return steps;
+}

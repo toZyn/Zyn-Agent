@@ -14,3 +14,9 @@ npm run test:tui
 The PTY scenarios cover coalesced Return and slash commands, bracketed paste, repeated theme changes, menus and cancel, resize events at different terminal widths, a 10,000-character draft, Ctrl+C, and normal or rapidly coalesced double ESC. Each case checks for process termination or continued responsiveness as appropriate.
 
 The tests run within a temporary data directory and do not alter normal user sessions. They do not prove that remote model APIs, MCP connections, arbitrary plugin code, large tool streams, network disconnections, or prolonged interactive sessions are reliable. Reproduce those separately with controlled providers and exercise the same code paths before shipping changes involving them.
+
+## Flood and scroll regression
+
+`npm run test:tui` also runs `tests/tui_flood_pty.py`. It renders 1,200 simulated alternating user and assistant messages, multiple streaming updates, and a separate 5,000-message case. It checks PageUp/PageDown and xterm SGR mouse-wheel scrolling, resizing, process responsiveness, and that Ink never emits a full-screen clear (`ESC[2J`) during the flood. The flood deliberately runs offline and does not incur model API charges.
+
+For manual extended stress, use `ZYN_FLOOD_MESSAGES=10000 node tests/tui_flood.mjs` in an interactive terminal. That fixture prints message count, elapsed time, retained viewport items, and RSS memory after completion. It is a UI benchmark rather than a provider/network benchmark. Large single-message rendering remains distinct from flooding the history with many messages.
