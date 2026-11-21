@@ -474,7 +474,23 @@ function EventLine({ kind, title, detail, width }) {
   };
   const { sym, color } = cfg[kind] || cfg.info;
   const content = formatEventPreview({ kind, title, detail }, width);
-  return h(Box, { paddingLeft: 2, paddingRight: 2, flexDirection: 'column' },
+  const isAgent = /\b(spawn_agent|wait_agent|followup_agent|resume_agent|close_agent|interrupt_agent)\b/.test(String(title || ''));
+  if (isAgent) {
+    return h(Box, { paddingLeft: 3, paddingRight: 3, marginTop: 1, marginBottom: 0, flexDirection: 'column' },
+      h(Box, { borderStyle: 'round', borderColor: T.borderLight, flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
+        h(Box, { gap: 1 },
+          h(Text, { color: T.accent, bold: true }, 'AGENT'),
+          h(Text, { color, bold: true }, sym),
+          h(Text, { color: T.textDim, wrap: 'truncate-end' }, String(title || '').trim()),
+        ),
+        ...content.lines.map((line, i) => h(Text, {
+          key: String(i), color: kind === 'error' ? T.red : T.accentSoft,
+          wrap: 'truncate-end',
+        }, line)),
+      ),
+    );
+  }
+  return h(Box, { paddingLeft: 3, paddingRight: 3, marginTop: kind === 'comment' ? 1 : 0, flexDirection: 'column' },
     h(Box, { gap: 1 },
       h(Text, { color, bold: true }, sym),
       h(Text, { color: kind === 'error' ? T.red : T.textDim, bold: true, wrap: 'truncate-end' }, String(title || '').trim()),

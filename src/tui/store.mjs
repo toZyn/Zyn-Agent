@@ -175,6 +175,21 @@ export class UIStore extends EventEmitter {
   }
 
   addEvent(kind, title, detail) {
+    const operation = String(title || '').match(/\b(spawn_agent|wait_agent|followup_agent|resume_agent|interrupt_agent|close_agent)\b/);
+    if (kind === 'ok' && operation) {
+      const index = this.items.findLastIndex(item =>
+        item.type === 'event' &&
+        item.kind === 'tool' &&
+        String(item.title || '').includes(operation[1]),
+      );
+      if (index >= 0 && this.items.length - index <= 5) {
+        this.items = this.items.map((item, i) => i === index
+          ? { ...item, kind, title, detail: detail || '' }
+          : item);
+        this._emit();
+        return;
+      }
+    }
     this.addItem({ type: 'event', kind, title, detail: detail || '' });
   }
 

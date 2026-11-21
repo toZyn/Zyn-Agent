@@ -1580,7 +1580,11 @@ async function executeToolCall(call, state, ui, options = {}) {
         const sender = state.__subagent?.agentId || 'parent';
         let data;
         if (call.tool === 'spawn_agent') data = coordinator.spawn(state, args);
-        if (call.tool === 'wait_agent') data = await coordinator.wait(args.agent_id, args.timeout_ms);
+        if (call.tool === 'wait_agent') {
+          const progress = await coordinator.wait(args.agent_id, args.timeout_ms);
+          const parentMessages = coordinator.readMessages('parent');
+          data = parentMessages.length ? { ...progress, messages: parentMessages } : progress;
+        }
         if (call.tool === 'list_agents') data = coordinator.list();
         if (call.tool === 'followup_agent') data = await coordinator.followup(args.agent_id, args.task);
         if (call.tool === 'resume_agent') {

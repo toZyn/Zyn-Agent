@@ -44,3 +44,13 @@ test('conversation history undo and redo preserve messages', () => {
   store.redoConversationTurn();
   assert.equal(store.items.at(-1).text, 'world');
 });
+
+
+test('agent preparation is replaced by the completed status without duplicating event cards', () => {
+  const store = new UIStore();
+  store.addEvent('tool', 'Preparing spawn_agent', '');
+  store.addEvent('ok', 'Completed spawn_agent', '{"agent_id":"a","role":"review","status":"running"}');
+  assert.equal(store.items.length, 1);
+  assert.equal(store.items[0].kind, 'ok');
+  assert.match(store.items[0].title, /Completed spawn_agent/);
+});

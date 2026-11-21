@@ -161,7 +161,7 @@ class SubagentCoordinator {
     this.ownerSession = parent.sessionId;
     this.parent = parent;
     for (const [recipient, messages] of Object.entries(doc.mailboxes || {})) {
-      if (Array.isArray(messages)) this.mailboxes.set(recipient, messages.slice(-100));
+      if (Array.isArray(messages)) this.mailboxes.set(recipient, messages);
     }
     const recovered = [];
     for (const record of doc.agents || []) {
@@ -199,8 +199,8 @@ class SubagentCoordinator {
   }
 
   startTurn(agent, task, recovering = false) {
-    if (agent.status === 'running') throw new Error('Subagent is already running.');
-    if (this.list().filter(item => item.status === 'running').length >= this.maxActive) {
+    if (agent.status === 'running' || agent.promisePending) throw new Error('Subagent is still running or cancelling.');
+    if ([...this.agents.values()].filter(item => item.status === 'running' || item.promisePending).length >= this.maxActive) {
       throw new Error('Active subagent limit reached.');
     }
     agent.task = task;
@@ -211,6 +211,7 @@ class SubagentCoordinator {
     agent.startedAt = new Date().toISOString();
     agent.controller = new AbortController();
     agent.stoppingForRestart = false;
+    agent.promisePending = true;
     const { signal } = agent.controller;
     this.persistChild(agent);
     this.persistMetadata();
@@ -228,6 +229,7 @@ class SubagentCoordinator {
         agent.error = signal.aborted ? null : (error?.message || String(error));
       })
       .finally(() => {
+        agent.promisePending = false;
         agent.finishedAt = new Date().toISOString();
         this.persistChild(agent);
         this.persistMetadata();
@@ -315,7 +317,7 @@ class SubagentCoordinator {
     const message = { message_id: randomUUID(), from: sender, to: recipient, content: text, at: new Date().toISOString() };
     const list = this.mailboxes.get(recipient) || [];
     list.push(message);
-    this.mailboxes.set(recipient, list.slice(-100));
+    this.mailboxes.set(recipient, list);
     this.persistMetadata();
     return { message_id: message.message_id, delivered: true, recipient };
   }

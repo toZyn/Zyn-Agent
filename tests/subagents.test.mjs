@@ -161,3 +161,32 @@ test('general child cannot perform account or plugin actions without the parent'
   assert.throws(() => assertToolAllowed({ tool: 'mcp_external_write', args: {} }, child), /cannot invoke/);
   assert.throws(() => assertToolAllowed({ tool: 'fetch', args: { method: 'POST' } }, child), /must be completed/);
 });
+
+
+test('a cancelling subagent cannot start a second turn until the first promise settles',async()=>{
+  let release;
+  let turns=0;
+  const manager=new SubagentCoordinator({runTurn:async()=>{
+    turns++;
+    if(turns===1) await new Promise(resolve=>{release=resolve;});
+    return {content:'finished'};
+  }});
+  const worker=manager.spawn(parent('cancel-test'),{task:'check'});
+  await new Promise(resolve=>setImmediate(resolve));
+  manager.interrupt(worker.agent_id);
+  assert.throws(()=>manager.resume(worker.agent_id),/still running or cancelling/);
+  release();
+  await new Promise(resolve=>setImmediate(resolve));
+  const continued=manager.resume(worker.agent_id);
+  assert.equal(continued.status,'running');
+  assert.equal((await manager.wait(worker.agent_id,1000)).status,'completed');
+});
+
+test('mailbox does not silently drop older messages when many arrive',()=>{
+  const manager=new SubagentCoordinator();
+  for(let i=0;i<140;i++) manager.sendMessage('parent','parent','Note '+i);
+  const messages=manager.readMessages('parent');
+  assert.equal(messages.length,140);
+  assert.equal(messages[0].content,'Note 0');
+  assert.equal(messages.at(-1).content,'Note 139');
+});
