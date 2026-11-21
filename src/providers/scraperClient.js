@@ -21,6 +21,7 @@ const { novita } = require('./novita/index');
 const { chutes } = require('./chutes/index');
 const { inference } = require('./inference/index');
 const { zyncloud } = require('./zyncloud/index');
+const { runChatGPTResponses } = require('./chatgpt');
 const { DEFAULT_MODEL_KEY, MODELS } = require('../config');
 const { describeProviderConfig } = require('./catalog');
 
@@ -123,6 +124,8 @@ async function runProvider(provider, messages, model, onChunk, options = {}) {
       return inference(messages, model.modelId || model.inferenceModel, onChunk, { ...options, config: providerConfig });
     case 'zyncloud':
       return zyncloud(messages, model.modelId || model.zyncloudModel, onChunk, { ...options, config: providerConfig });
+    case 'chatgpt':
+      return runChatGPTResponses(messages, model.modelId, onChunk, options);
     case 'custom':
       return custom(messages, model, onChunk, { ...options, config: providerConfig });
     default:

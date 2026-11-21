@@ -17,8 +17,9 @@ ANSI = re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[PX^_].
 
 
 class Terminal:
-    def __init__(self, cols=80, rows=24, command=None, env_extra=None, wait_ready=True):
+    def __init__(self, cols=80, rows=24, command=None, env_extra=None, wait_ready=True, prepare=None):
         self.tmp = tempfile.TemporaryDirectory(prefix='zyn-tui-test-')
+        if prepare: prepare(Path(self.tmp.name))
         self.master, slave = pty.openpty()
         self._winsize(slave, cols, rows)
         env = os.environ.copy()

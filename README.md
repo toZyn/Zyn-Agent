@@ -1,6 +1,8 @@
 # Zyn Agent
 
-A terminal-based coding agent with an Ink TUI, CLI, model-provider adapters, local tools, session storage, MCP connections and portable Agent Skills. Built for Node.js 22 or newer.
+<p align="center"><img src="assets/brand/logo.svg" width="180" alt="Zyn Agent logo" /></p>
+
+A terminal-based coding agent (v1.7.0) with an Ink TUI, CLI, model-provider adapters, local tools, session storage, MCP connections and portable Agent Skills. Built for Node.js 22 or newer.
 
 The source code and current implementation live at [toZyn/Zyn-Agent](https://github.com/toZyn/Zyn-Agent). This README describes implemented behavior, not a promise of feature parity with other coding agents.
 
@@ -10,6 +12,8 @@ The source code and current implementation live at [toZyn/Zyn-Agent](https://git
 npm install -g zyn-ai
 zyn
 ```
+
+**Release channels:** GitHub may contain a newer version than npm. An npm update is published separately after explicit maintainer approval.
 
 From source:
 
@@ -38,7 +42,31 @@ zyn memory forget
 
 Inside the agent, use `/memory prompt`, `/memory import <file>`, or `/memory forget`. Forget removes the imported profile and copies in saved Zyn sessions; it does not delete data in the original application or remove its backups.
 
+## ChatGPT account models without Codex CLI
+
+Zyn supports direct [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for eligible accounts. This authorization is implemented in Zyn using standard OAuth 2.0 PKCE and OpenID Connect, not by copying Codex session tokens or depending on the Codex executable. OpenAI assigns the OAuth client ID during the first sign-in; no manual API key, `client_id` or `client_secret` is needed.
+
+```sh
+zyn auth chatgpt login
+zyn auth chatgpt models
+zyn auth chatgpt status
+zyn auth chatgpt logout
+```
+
+In the interactive agent, use `/auth chatgpt login` and `/providers` to select the ChatGPT account and its available models. Zyn displays the authorization URL; open it in a browser that can reach Zyn's `127.0.0.1` callback. Authentication on a different computer requires forwarding the callback securely. New sessions are explicitly authorized by the user; identity-only authorization does not grant model use.
+
+The account token is saved with owner-only permissions in Zyn's local data directory. Zyn calls the public `/v1/models` and `/v1/responses` endpoints with the granted OAuth access token. This feature is subject to account eligibility, plan limits, preview capabilities and user consent. It is **not** an unlimited or unofficial ChatGPT API. See [Official Sign in with ChatGPT documentation](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+
+This implementation is independent of the separately licensed OpenAI Sign in with ChatGPT DevKit. Zyn does not bundle the DevKit or copy its noncommercial source code.
+
 ## Core commands
+
+The main commands are organized by workflow. Run `/help` in the TUI, `/help <command>` for focused usage, or `zyn help` in the shell. All discoverable commands are listed in the [full command reference](docs/COMMANDS.md).
+
+Examples: `/model` opens the selector, `/model <id>` switches models, `/login chatgpt` opens authorization, `/context` displays a labeled text-only token estimate, and `/stats` reports observable session counters. Neither `/stats` nor `/usage` claims to read your provider's billing data.
+
+The native `zyn auth` command also supports `status`, `list`, `github login|status|logout`, `gmail login|status|logout`, and the ChatGPT login/status/models/logout flow. GitHub and Gmail require their respective installed official CLIs (or other existing supported credentials).
+
 
 | Task | Command |
 | --- | --- |

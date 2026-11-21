@@ -1,6 +1,6 @@
 {
   "name": "zyn-ai",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Terminal coding agent with tools, persistent sessions, MCP integrations and portable Agent Skills",
   "author": "Zyn",
   "keywords": [
@@ -34,8 +34,11 @@
     "dev": "node zyn.js",
     "check": "node scripts/check-syntax.js",
     "test": "node --test tests/*.test.mjs",
-    "test:tui": "python3 -m unittest discover -s tests -p 'tui*pty.py' -v",
-    "test:all": "npm run check && npm test && npm run test:tui"
+    "test:tui": "python3 -m unittest discover -s tests -p '*pty.py' -v",
+    "test:all": "npm run check && npm run check:commands && npm test && npm run test:tui",
+    "bench:tui": "python3 scripts/benchmark-tui.py",
+    "docs:commands": "node scripts/generate-command-reference.js",
+    "check:commands": "node scripts/generate-command-reference.js --check"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -44,6 +47,8 @@
     "express": "^5.2.1",
     "express-session": "^1.18.1",
     "ink": "^7.1.0",
+    "jose": "^6.2.18",
+    "proper-lockfile": "^4.1.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "session-file-store": "^1.5.0",
@@ -65,7 +70,9 @@
     "zyn.js",
     "src/",
     "data/",
+    "assets/",
     "docs/",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

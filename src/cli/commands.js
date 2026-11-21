@@ -10,6 +10,7 @@ const { listGitSecrets, removeGitSecret, upsertGitSecret } = require('../utils/s
 const { clearGmailAuth, getGmailAuthStatus, startGmailOAuthFlow } = require('../utils/gmailAuth');
 const { exportTranscriptText, formatTranscriptPreview } = require('../utils/transcriptStorage');
 const { resolveInputPath } = require('../utils/pathUtils');
+const { getProviderBrand } = require('../providers/brand');
 const { detachBackgroundTurn } = require('../utils/backgroundWorker');
 const {
   describeProviderConfig,
@@ -48,6 +49,23 @@ function printLanguageChanged(language) {
 
 const SLASH_COMMANDS = [
   { name: 'help', desc: 'full help', descEs: 'ayuda completa' },
+  { name: 'version', desc: 'installed Zyn version', descEs: 'versión instalada' },
+  { name: 'model', desc: 'choose or switch model', descEs: 'elegir o cambiar modelo' },
+  { name: 'login', desc: 'connect an account', descEs: 'conectar una cuenta' },
+  { name: 'logout', desc: 'disconnect an account', descEs: 'desconectar una cuenta' },
+  { name: 'account', desc: 'ChatGPT account status', descEs: 'estado de la cuenta ChatGPT' },
+  { name: 'context', desc: 'show current context size estimate', descEs: 'ver estimación de contexto' },
+  { name: 'stats', desc: 'show real session counts', descEs: 'mostrar métricas reales de sesión' },
+  { name: 'usage', desc: 'show session usage estimate, not billing', descEs: 'uso estimado, sin facturación' },
+  { name: 'clear', desc: 'clear conversation context', descEs: 'limpiar contexto de conversación' },
+  { name: 'quit', desc: 'exit the session', descEs: 'salir de la sesión' },
+  { name: 'auth', desc: 'connect ChatGPT plan, GitHub and Gmail', descEs: 'conectar plan ChatGPT, GitHub y Gmail' },
+  { name: 'doctor', desc: 'diagnose setup and authentication', descEs: 'diagnosticar el entorno' },
+  { name: 'tools', desc: 'list actual agent tools', descEs: 'listar herramientas reales' },
+  { name: 'permissions', desc: 'inspect and change approval mode', descEs: 'gestionar aprobaciones' },
+  { name: 'plan', desc: 'enforced read-only planning', descEs: 'planificar en solo lectura' },
+  { name: 'init', desc: 'create project AGENTS.md', descEs: 'crear AGENTS.md del proyecto' },
+  { name: 'diff', desc: 'inspect local Git changes', descEs: 'examinar cambios Git' },
   { name: 'status', desc: 'current status', descEs: 'estado actual' },
   { name: 'history', desc: 'recent actions', descEs: 'acciones recientes' },
   { name: 'memory', desc: 'view, import or forget portable memory', descEs: 'ver, importar u olvidar memoria' },
@@ -96,22 +114,26 @@ function printHelp(state = {}) {
   const es = normalizeLanguage(state.language || DEFAULT_LANGUAGE) === 'es';
   const sections = es ? [
     ['Sesiones', '/new · /resume <id> · /sessions · /title <texto> · /history'],
-    ['Modelos', '/models · /providers · /provider · /settings'],
+    ['Diagnóstico', '/doctor · /version · /auth · /login · /logout · /account · /permissions · /tools'],
+    ['Proyecto', '/plan on|off · /init · /diff · /context · /stats · /usage'],
+    ['Modelos', '/model · /models · /providers · /provider · /settings'],
     ['Contexto', '/memory · /memory prompt · /memory import <archivo> · /memory forget'],
     ['Skills', '/skills list · /skills show <nombre> [recurso] · /skills install <repo>'],
     ['Herramientas', '/plugins · /mcp · /git · /gmail'],
     ['Interfaz', '/theme · /lang <es|en> · /thinking on|off · /cwd'],
     ['Operaciones', '/status · /compact · /transcript · /export · /bg'],
-    ['Control', '/help · /stop · /reset · /exit'],
+    ['Control', '/help <comando> · /stop · /clear · /reset · /exit · /quit'],
   ] : [
     ['Sessions', '/new · /resume <id> · /sessions · /title <text> · /history'],
-    ['Models', '/models · /providers · /provider · /settings'],
+    ['Diagnostics', '/doctor · /version · /auth · /login · /logout · /account · /permissions · /tools'],
+    ['Project', '/plan on|off · /init · /diff · /context · /stats · /usage'],
+    ['Models', '/model · /models · /providers · /provider · /settings'],
     ['Context', '/memory · /memory prompt · /memory import <file> · /memory forget'],
     ['Skills', '/skills list · /skills show <name> [resource] · /skills install <repo>'],
     ['Tools', '/plugins · /mcp · /git · /gmail'],
     ['Interface', '/theme · /lang <es|en> · /thinking on|off · /cwd'],
     ['Operations', '/status · /compact · /transcript · /export · /bg'],
-    ['Control', '/help · /stop · /reset · /exit'],
+    ['Control', '/help <command> · /stop · /clear · /reset · /exit · /quit'],
   ];
   console.log('\nZyn | ' + (es ? 'Comandos principales' : 'Main commands'));
   console.log(es ? 'Usa cada comando sin argumentos para ver sus opciones.' : 'Run a command without arguments to see its options.');
@@ -122,7 +144,8 @@ function printHelp(state = {}) {
 function printModels() {
   const providers = listProvidersFromModels(MODELS);
   for (const provider of providers) {
-    console.log(`\n  ${provider.key}`);
+    const brand = getProviderBrand(provider.key);
+    console.log(`\n  [${brand.mark}] ${brand.label} (${provider.models.length} models)`);
     for (const model of provider.models) {
       const active = model.key === (global.__zynActiveModel || DEFAULT_MODEL_KEY) ? ' ◀' : '';
       console.log(`    ${model.key.padEnd(16)} ${model.label}${active}`);
@@ -139,7 +162,7 @@ function buildModelListItems() {
       const isActive = model.key === (global.__zynActiveModel || DEFAULT_MODEL_KEY);
       items.push({
         key: model.key,
-        label: `${model.key.padEnd(22)} ${model.label}`,
+        label: `[${getProviderBrand(provider.key).mark}] ${model.label} (${model.key})`,
         provider: provider.key,
         active: isActive,
       });
@@ -197,7 +220,8 @@ async function runProviderSelector(state, deps) {
     items,
     getLabel: (item) => {
       if (item.key === addCustomKey) return '+ ' + t(state.language, 'providerAddCustom');
-      return item.label;
+      const brand = getProviderBrand(item.key);
+      return `[${brand.mark}] ${brand.label} · ${(item.models || []).length} models`;
     },
     getValue: (item) => item.key,
   });
@@ -243,6 +267,17 @@ async function runProviderSelector(state, deps) {
 async function runProviderModelsSelector(state, deps, providerKey) {
   const es = state.language === 'es';
 
+  if (providerKey === 'chatgpt') {
+    const { getChatGPTStatus } = require('../auth/chatgpt');
+    const account = await getChatGPTStatus();
+    if (!account.sharing) {
+      console.log('Use /auth chatgpt login to authorize your ChatGPT plan first.');
+      return null;
+    }
+    const { refreshChatGPTCatalog } = require('../providers/chatgpt');
+    try { await refreshChatGPTCatalog(); }
+    catch (error) { console.log(`Unable to refresh ChatGPT models: ${error.message}`); return null; }
+  }
   if (providerKey === 'zyncloud') {
     try {
       const { syncProvider } = require('../providers/catalog');
@@ -379,8 +414,158 @@ async function handleLocalCommand(input, state, deps) {
   } = deps;
 
   if (commandName === 'help') {
-    printHelp(state);
+    if (args) {
+      const key = args.replace(/^\//, '').split(/\s+/)[0].toLowerCase();
+      const entry = SLASH_COMMANDS.find(item => item.name === key);
+      if (!entry) throw new Error(`Unknown command: /${key}. Use /help.`);
+      const es = state.language === 'es';
+      const examples = {
+        auth: '/auth status · /auth chatgpt login · /auth chatgpt models · /auth chatgpt logout',
+        login: '/login chatgpt · /login github · /login gmail',
+        logout: '/logout chatgpt · /logout github · /logout gmail',
+        model: '/model · /model <model-id>',
+        context: '/context', stats: '/stats', usage: '/usage',
+        plan: '/plan on · /plan off', permissions: '/permissions manual · /permissions auto',
+        skills: '/skills list · /skills show <name> · /skills install <repository>',
+      };
+      console.log(`/${entry.name}: ${es ? (entry.descEs || entry.desc) : entry.desc}`);
+      if (examples[key]) console.log(examples[key]);
+    } else printHelp(state);
     return true;
+  }
+  if (commandName === 'version') {
+    console.log(`Zyn Agent v${require('../../package.json').version}`);
+    return true;
+  }
+  if (commandName === 'model') {
+    if (args) {
+      await switchActiveModel(state, deps, args.toLowerCase());
+      printModelChanged(state.activeModel);
+    } else if (askSelect) await runModelsFlow(state, deps);
+    else printModels();
+    return true;
+  }
+  if (commandName === 'context' || commandName === 'stats' || commandName === 'usage') {
+    console.log(require('./session-metrics').formatSessionMetrics(state, {contextOnly: commandName === 'context'}));
+    return true;
+  }
+  if (commandName === 'account') return handleLocalCommand('/auth chatgpt status', state, deps);
+  if (commandName === 'login') {
+    const platform = args.trim().toLowerCase();
+    if (!platform) { console.log('Usage: /login chatgpt | /login github | /login gmail'); return true; }
+    if (platform === 'github' || platform === 'gmail') return handleLocalCommand(`/auth ${platform}`, state, deps);
+    if (platform === 'chatgpt') return handleLocalCommand('/auth chatgpt login', state, deps);
+    throw new Error('Usage: /login chatgpt | /login github | /login gmail');
+  }
+  if (commandName === 'logout') {
+    const platform = args.trim().toLowerCase() || 'chatgpt';
+    if (platform === 'chatgpt') return handleLocalCommand('/auth chatgpt logout', state, deps);
+    if (platform === 'github') { console.log('Use gh auth logout --hostname github.com to disconnect GitHub.'); return true; }
+    if (platform === 'gmail') {
+      console.log('For legacy Gmail: /gmail disconnect. For Google Workspace CLI: zyn auth gmail logout.');
+      return true;
+    }
+    throw new Error('Usage: /logout [chatgpt|github|gmail]');
+  }
+
+  if (commandName === 'doctor') {
+    const { environmentReport } = require('./essentials');
+    console.log(await environmentReport(state));
+    return true;
+  }
+  if (commandName === 'tools') {
+    const { TOOL_DEFINITIONS, getMcpToolDefinitions, refreshPluginTools } = require('../tools');
+    const { getPluginToolDefinitions } = require('../plugins');
+    refreshPluginTools();
+    const all = [...TOOL_DEFINITIONS.map(item => item.name), ...getMcpToolDefinitions().map(item => item.name), ...getPluginToolDefinitions().map(item => item.name)];
+    console.log(`Available tools (${all.length}):\n${[...new Set(all)].sort().join(', ')}`);
+    return true;
+  }
+  if (commandName === 'plan') {
+    if (args && args !== 'on' && args !== 'off') throw new Error('Usage: /plan [on|off]');
+    state.settings = state.settings || {};
+    if (args) {
+      state.settings.planMode = args === 'on';
+      await saveState(state);
+    }
+    console.log(`Plan mode: ${state.settings.planMode ? 'ON (read-only tools)' : 'OFF'}`);
+    return true;
+  }
+  if (commandName === 'permissions') {
+    const option = args.toLowerCase();
+    if (option && !['manual','auto'].includes(option)) throw new Error('Usage: /permissions [manual|auto]');
+    if (option) {
+      state.autoApprove = option === 'auto';
+      await saveState(state);
+    }
+    console.log(`Tool approvals: ${state.autoApprove ? 'automatic' : 'manual'}; Plan mode: ${state.settings?.planMode ? 'ON' : 'OFF'}`);
+    return true;
+  }
+  if (commandName === 'diff') {
+    const { readGitDiff } = require('./essentials');
+    console.log(await readGitDiff(state.cwd || process.cwd()));
+    return true;
+  }
+  if (commandName === 'init') {
+    const { createProjectInstructions } = require('./essentials');
+    const filename = path.join(state.cwd || process.cwd(), 'AGENTS.md');
+    if (fs.existsSync(filename)) {
+      console.log('AGENTS.md already exists. Nothing was replaced.');
+      return true;
+    }
+    if (!deps.askConfirm) throw new Error('Interactive confirmation required for /init');
+    const accepted = await deps.askConfirm({ title: 'Create AGENTS.md?', detail: filename });
+    if (!accepted) { console.log('Cancelled.'); return true; }
+    const created = await createProjectInstructions(state.cwd || process.cwd());
+    console.log(created.created ? `Created ${created.filename}` : 'AGENTS.md already exists.');
+    return true;
+  }
+  if (commandName === 'auth') {
+    const { listAuthenticationStatus } = require('./essentials');
+    const [provider = 'status', operation = 'status'] = String(args || '').trim().toLowerCase().split(/\s+/);
+    if (provider === 'status') {
+      const status = await listAuthenticationStatus();
+      for (const [name, detail] of Object.entries(status)) console.log(`${name}: ${detail.installed ? (detail.authenticated ? 'connected' : 'not connected') : 'official CLI not installed'}`);
+      console.log('Use /auth chatgpt login, or zyn auth github login / zyn auth gmail login in a terminal.');
+      return true;
+    }
+    if (provider === 'chatgpt') {
+      const { getChatGPTStatus, startChatGPTLogin, disconnectChatGPT } = require('../auth/chatgpt');
+      const { refreshChatGPTCatalog } = require('../providers/chatgpt');
+      if (operation === 'status') {
+        const status = await getChatGPTStatus();
+        console.log(`ChatGPT: ${status.connected ? 'connected' : 'not connected'}; Plan usage: ${status.sharing ? 'enabled' : 'not authorized'}${status.email ? `; ${status.email}` : ''}`);
+      } else if (operation === 'login') {
+        const previous = await getChatGPTStatus();
+        const flow = await (deps.startChatGPTLogin || startChatGPTLogin)({ reconnect: previous.connected });
+        state.__chatgptLoginFlow = flow;
+        console.log('Continue with ChatGPT. Opening your browser; use the URL below if needed:');
+        console.log(flow.url);
+        require('../auth/browser').openChatGPTAuthBrowser(flow.url);
+        console.log('For remote servers, the localhost callback requires secure port forwarding.');
+        flow.done.then(async account => {
+          if (account.sharing) {
+            const models = await refreshChatGPTCatalog();
+            const preferred = models[0] && `chatgpt-${models[0].slug}`;
+            if (preferred) await switchActiveModel(state, deps, preferred);
+            console.log(`ChatGPT plan authorized; ${models.length} models available.`);
+          } else console.log('ChatGPT account connected without permission to use plan models.');
+        }).catch(error => console.error(`ChatGPT sign-in failed: ${error.message}`)).finally(() => { state.__chatgptLoginFlow = null; });
+      } else if (operation === 'models') {
+        const models = await refreshChatGPTCatalog();
+        console.log(models.map(model => `${model.slug} · ${model.label}`).join('\n') || 'No models available.');
+      } else if (operation === 'logout') {
+        state.__chatgptLoginFlow?.cancel();
+        const result = await disconnectChatGPT();
+        console.log(result.remoteRevoked ? 'ChatGPT session revoked.' : 'Local ChatGPT session cleared; confirm revocation in ChatGPT Settings.');
+      } else throw new Error('Usage: /auth chatgpt [login|status|models|logout]');
+      return true;
+    }
+    if (provider === 'github' || provider === 'gmail') {
+      console.log(`Use zyn auth ${provider} login to connect, or zyn auth ${provider} logout to disconnect.`);
+      return true;
+    }
+    throw new Error('Usage: /auth [status|chatgpt login|chatgpt status|chatgpt models|chatgpt logout|github|gmail]');
   }
 
   if (commandName === 'status') {
@@ -932,7 +1117,7 @@ async function runProvidersFlow(state, deps) {
   }
 
   // Paso 3: Si es opcional y no configurado, preguntar si configurar
-  if (!isProviderConfigured(provider)) {
+  if (provider !== 'chatgpt' && !isProviderConfigured(provider)) {
     const configure = await deps.askConfirm({
       title: t(state.language, 'providerConfigureTitle', { provider }),
       detail: t(state.language, 'providerConfigureDetail'),
@@ -1006,6 +1191,10 @@ async function runModelsFlow(state, deps) {
 
     if (sub === 'status') {
       const status = await getGmailAuthStatus();
+      if (!status.connected && require('../integrations/gws-gmail').isGwsConnected()) {
+        console.log('Gmail conectado mediante Google Workspace CLI (gws).');
+        return true;
+      }
       if (!status.connected) {
         console.log(t(state.language, 'gmailNotConnected'));
       } else {

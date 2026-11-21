@@ -1,0 +1,37 @@
+name: GitHub release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  github-release:
+    if: "startsWith(github.event.head_commit.message, 'release: v')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:all
+      - name: Create tagged GitHub release from tested sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="v$(node -p 'require("./package.json").version')"
+          if [[ "$COMMIT_MESSAGE" != "release: $version" ]]; then
+            echo 'Release commit message and package version disagree'
+            exit 1
+          fi
+          notes="docs/releases/${version}.md"
+          test -s "$notes"
+          gh release create "$version" --target "$GITHUB_SHA" --title "Zyn Agent ${version}" --notes-file "$notes" --latest

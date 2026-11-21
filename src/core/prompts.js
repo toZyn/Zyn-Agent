@@ -96,6 +96,7 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
   for (const t of pluginDefs) KNOWN_TOOLS.add(t.name);
 
   const skillsIndex = buildSkillsIndexPrompt({ cwd });
+  const planMode = Boolean(state.settings?.planMode);
   const providerGroups = listProvidersFromModels(MODELS)
     .map(group => `${group.key}: ${group.models.map(m => m.key).join(', ')}`)
     .join('\n');
@@ -431,6 +432,7 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
     ]),
     '',
     '# TOOLS',
+    ...(planMode ? ['# READ-ONLY PLAN MODE', 'Plan mode is active: only read-only tools are permitted. Do not modify files, execute shell commands or call unknown external tools. Propose a verifiable plan and ask to turn off /plan before any modifications.'] : []),
     getToolPromptText(),
     '',
     ...(language === 'es' ? [

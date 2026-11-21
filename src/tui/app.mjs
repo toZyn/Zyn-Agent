@@ -13,6 +13,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { runAgentTurn } = require('../core/agent');
 const { parseAgentResponse } = require('../core/prompts');
+const { getProviderBrand } = require('../providers/brand');
 const { handleLocalCommand, SLASH_COMMANDS } = require('../cli/commands');
 const { countTokens, estimateContextTokens, getContextLimit } = require('../config');
 const {
@@ -719,7 +720,7 @@ function SelectBar({ request, width, height = 24 }) {
   );
 }
 
-function StatusBar({ store, model, processing, width, turnCount }) {
+function StatusBar({ store, model, providerKey, processing, width, turnCount }) {
   const [frame, setFrame] = useState(0);
   const frames = T.spinFrames || SPIN_FRAMES;
   const ms = T.spinMs || SPIN_MS;
@@ -731,6 +732,7 @@ function StatusBar({ store, model, processing, width, turnCount }) {
   }, [processing, frames.length, ms]);
 
   const layout = layoutForWidth(width);
+  const active = getProviderBrand(providerKey);
   const line = '\u2500'.repeat(Math.max(1, Math.min(layout.columns - 4, 120)));
   const safeW = layout.statusWidth;
   const tokenEstimate = store.tokenEstimate || 0;
@@ -766,6 +768,7 @@ function StatusBar({ store, model, processing, width, turnCount }) {
     h(Box, { paddingLeft: 1, paddingTop: 0, gap: 1, justifyContent: 'space-between', width: safeW },
       h(Box, { gap: 1 },
         h(Text, { color: T.accent }, '>'),
+        h(Text, { color: active.color }, `[${active.mark}]`),
         h(Text, { color: T.textGhost }, model),
         processing
           ? h(Text, { color: T.accentSoft }, frames[frame])
@@ -1385,6 +1388,7 @@ export function App({ store, state, onSubmit }) {
     h(StatusBar, {
       store,
       model: modelLabel,
+      providerKey: MODELS[state.activeModel]?.provider || 'unknown',
       processing: store.processing,
       width,
       turnCount: store.turnCount,

@@ -17,6 +17,9 @@ This is an implementation-oriented comparison with the documented features of Cl
 | Permissions and sandboxing | Scoped grants and isolation | Partial; local approval exists, but there is no secure OS-level plugin sandbox |
 | Visual/desktop automation | Computer-use tool integration | Not part of this verified scope |
 | Model execution | Reliable providers, streaming, tool loops | Existing adapters; live-provider interoperability needs separate integration tests |
+| ChatGPT-plan sign-in | Account-authorized, no manual API key | Implemented as independent OAuth/OIDC + PKCE client and official Responses streaming; verified against fixtures, live account test outstanding |
+| Token renewal and revocation | Avoid losing sessions and leaking credentials | Owner-only local storage, cross-process rotating-token lock, best-effort remote revocation and honest error reporting |
+| Coding-agent planning | Predictable non-destructive planning | Central tool-policy enforcement for read-only plan mode, with unit tests; not a secure OS sandbox |
 
 ## Engineering decisions
 
@@ -27,6 +30,9 @@ This is an implementation-oriented comparison with the documented features of Cl
 - Documentation states a feature as complete only when an implementation and a repeatable test establish its behavior.
 
 ## References
+
+- [Sign in with ChatGPT for open-source apps](https://developers.openai.com/siwc/token-sharing-open-source)
+- [ChatGPT plan model discovery and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 
 - [Agent Skills specification](https://agentskills.io/specification)
 - [Claude Code: Skills](https://code.claude.com/docs/en/skills)

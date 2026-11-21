@@ -24,3 +24,9 @@ For manual extended stress, use `ZYN_FLOOD_MESSAGES=10000 node tests/tui_flood.m
 Ink disables interactive output by default under `CI` / `GITHUB_ACTIONS`, even with a TTY. The TUI explicitly enables Ink interactivity only when both standard input and output are TTYs. The PTY regression suite includes this environment to detect blank screens in CI.
 
 The first-launch integration scenario additionally verifies that memory onboarding is optional, accepts a fenced multiline export, writes a private profile file and creates a session snapshot. `ZYN_SKIP_ONBOARDING=1` is used by automated unrelated TUI tests to avoid accidental first-run prompts; the onboarding flow is tested explicitly without that flag.
+
+## ChatGPT account adapter regression
+
+`tests/chatgpt_pty.py` starts a real terminal session with a temporary, simulated authorized ChatGPT account and an injected HTTP fixture. It verifies that the normal Zyn agent and Ink TUI use model discovery and Responses streaming without a Codex CLI binary or real credentials. `tests/chatgpt-auth.test.mjs` checks dynamic OAuth registration, PKCE, callback CSRF checks, signed ID-token validation, consent scopes, cancellation and rejection of an unexpected account identity. `tests/chatgpt-refresh-concurrency.test.mjs` runs two processes against a test server that rotates refresh tokens, detecting token-reuse races. These tests do not connect to a genuine ChatGPT account or imply unrestricted access to subscription models.
+
+For a repeatable terminal-only stress benchmark, run `npm run bench:tui`, or `python3 scripts/benchmark-tui.py 10000`. It reports insert duration, resident memory, screen clears, whether PageUp worked and the exit status. Compare results only under the same hardware, terminal size and workload; output alone does not prove superiority to other agents.

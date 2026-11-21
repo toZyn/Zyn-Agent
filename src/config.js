@@ -521,6 +521,8 @@ const BUILTIN_MODELS = {
   'replicate-llama-3.1-405b': { label: 'Llama 3.1 405B (Replicate)', provider: 'replicate', modelId: 'meta/meta-llama-3.1-405b-instruct', contextLength: 131072 },
   'replicate-llama-3.1-8b': { label: 'Llama 3.1 8B (Replicate)', provider: 'replicate', modelId: 'meta/meta-llama-3.1-8b-instruct', contextLength: 131072 },
 
+  'chatgpt-account': { label: 'ChatGPT plan · automatic', provider: 'chatgpt', contextLength: 128000 },
+
   // ===== Zyn Cloud =====
   'zyncloud-minimax-m3-thinking': { label: 'Minimax M3 Thinking', provider: 'zyncloud', modelId: 'minimax-m3-thinking', contextLength: 128000 },
   'zyncloud-minimax-m3': { label: 'Minimax M3', provider: 'zyncloud', modelId: 'minimax-m3', contextLength: 128000 },
@@ -531,7 +533,7 @@ const SUPPORTED_MODEL_PROVIDERS = new Set([
   'openai', 'anthropic', 'groq', 'together', 'openrouter', 'mistral',
   'xai', 'cohere', 'fireworks', 'perplexity', 'ollama', 'ollamaCloud',
   'github', 'azure', 'bedrock', 'vertex', 'replicate', 'cloudflare',
-  'lmstudio', 'novita', 'chutes', 'inference', 'zyncloud',
+  'lmstudio', 'novita', 'chutes', 'inference', 'zyncloud', 'chatgpt',
 ]);
 const GEMINI_MODEL_WARNING = '';
 
@@ -593,9 +595,24 @@ function loadExternalModels() {
   );
 }
 
+function loadChatGPTModelCache() {
+  const saved = readJsonFile(path.join(USER_DATA_ROOT, 'chatgpt', 'models.json'));
+  if (!Array.isArray(saved?.models)) return {};
+  const collected = {};
+  for (const model of saved.models) {
+    if (!/^[a-zA-Z0-9._:-]{1,100}$/.test(model?.slug || '')) continue;
+    collected[`chatgpt-${model.slug}`] = {
+      label: `${String(model.label || model.slug).slice(0,120)} (ChatGPT plan)`,
+      provider: 'chatgpt', modelId: model.slug, contextLength: 128000,
+    };
+  }
+  return collected;
+}
+
 const MODELS = {
   ...BUILTIN_MODELS,
   ...loadExternalModels(),
+  ...loadChatGPTModelCache(),
 };
 
 const DEFAULT_MODEL_KEY = process.env.ZYN_DEFAULT_MODEL || 'zyncloud-minimax-m3';

@@ -66,6 +66,7 @@ const {
 } = require('../utils/secretStorage');
 const { resolveInputPath } = require('../utils/pathUtils');
 const { getGmailAuthStatus, gmailApiRequest } = require('../utils/gmailAuth');
+const { isGwsConnected, gwsGmailAction } = require('../integrations/gws-gmail');
 const { loadSkill, listSkills, readSkillResource } = require('../core/skills');
 const {
   formatLineRange,
@@ -1262,10 +1263,13 @@ function buildRawEmail({ to, subject, body }) {
 
 async function gmailTool(args = {}, state, paint) {
   const action = String(args.action || 'status').toLowerCase().trim();
+  const legacyStatus = await getGmailAuthStatus();
+  const usingGws = !legacyStatus.connected && isGwsConnected();
 
   if (action === 'status') {
-    const status = await getGmailAuthStatus();
-    if (!status.connected) return 'Gmail no conectado. Usa /gmail connect para iniciar sesion.';
+    const status = legacyStatus;
+    if (usingGws) return 'Gmail conectado mediante Google Workspace CLI. Las credenciales las administra gws.';
+    if (!status.connected) return 'Gmail no conectado. Usa /gmail connect o zyn auth gmail login.';
     return [
       'Gmail conectado.',
       `Cuenta: ${status.email || 'desconocida'}`,
@@ -1276,17 +1280,14 @@ async function gmailTool(args = {}, state, paint) {
 
   if (action === 'list') {
     const maxResults = Math.max(1, Math.min(20, Number(args.maxResults || 10)));
-    const data = await gmailApiRequest('GET', '/users/me/messages', {
-      query: {
-        q: args.query || '',
-        maxResults,
-      },
+    const data = usingGws ? await gwsGmailAction('list', { q: args.query || '', maxResults }) : await gmailApiRequest('GET', '/users/me/messages', {
+      query: { q: args.query || '', maxResults },
     });
     const messages = Array.isArray(data.messages) ? data.messages : [];
     if (messages.length === 0) return 'No se encontraron correos.';
     const details = [];
     for (const message of messages) {
-      const full = await gmailApiRequest('GET', `/users/me/messages/${encodeURIComponent(message.id)}`, {
+      const full = usingGws ? await gwsGmailAction('read', { id: message.id, format: 'metadata' }) : await gmailApiRequest('GET', `/users/me/messages/${encodeURIComponent(message.id)}`, {
         query: { format: 'metadata' },
       });
       details.push(formatMessageSummary(full));
@@ -1296,7 +1297,7 @@ async function gmailTool(args = {}, state, paint) {
 
   if (action === 'read') {
     if (!args.id || typeof args.id !== 'string') throw new Error(t(state?.language, 'gmail read requiere id', 'gmail read requires id'));
-    const message = await gmailApiRequest('GET', `/users/me/messages/${encodeURIComponent(args.id)}`, {
+    const message = usingGws ? await gwsGmailAction('read', { id: args.id, format: 'full' }) : await gmailApiRequest('GET', `/users/me/messages/${encodeURIComponent(args.id)}`, {
       query: { format: 'full' },
     });
     const text = collectMessageText(message.payload).join('\n').trim();
@@ -1318,8 +1319,9 @@ async function gmailTool(args = {}, state, paint) {
       state,
     );
     if (!allowed) return 'Envio de Gmail cancelado.';
-    const data = await gmailApiRequest('POST', '/users/me/messages/send', {
-      body: { raw: buildRawEmail(args) },
+    const raw = buildRawEmail(args);
+    const data = usingGws ? await gwsGmailAction('send', {}, { raw }) : await gmailApiRequest('POST', '/users/me/messages/send', {
+      body: { raw },
     });
     return [`Correo enviado.`, `ID: ${data.id || '-'}`, `Thread: ${data.threadId || '-'}`].join('\n');
   }
@@ -1519,6 +1521,7 @@ async function webReadTool(args, state, paint) {
 }
 
 async function executeToolCall(call, state, ui, options = {}) {
+  require('../core/tool-policy').assertToolAllowed(call, state);
   if (!call || typeof call.tool !== 'string' || !REGISTERED_TOOLS.has(call.tool)) {
     throw new Error(t(state?.language, `Herramienta no registrada: ${call?.tool || 'desconocida'}`, `Unknown tool: ${call?.tool || 'unknown'}`));
   }
@@ -1880,16 +1883,22 @@ async function gitUnifiedTool(args, state, paint, ctx) {
     const pathValue = String(args.path || '').trim();
     if (!pathValue) throw new Error(t(state?.language, 'git action="api" requiere path', 'git action="api" requires path'));
     const profile = resolveGitProfile(provider, name);
-    if (!profile) throw new Error(t(state?.language, `Proveedor ${provider}${provider === 'custom' && name ? `:${name}` : ''} no configurado.`, `Provider ${provider}${provider === 'custom' && name ? `:${name}` : ''} not configured.`));
-    const baseUrl = getApiBaseUrl(provider, profile);
+    const useGh = provider === 'github' && !profile;
+    if (!profile && !useGh) throw new Error(t(state?.language, `Proveedor ${provider}${provider === 'custom' && name ? `:${name}` : ''} no configurado.`, `Provider ${provider}${provider === 'custom' && name ? `:${name}` : ''} not configured.`));
+    const baseUrl = useGh ? 'https://api.github.com' : getApiBaseUrl(provider, profile);
     if (!baseUrl) throw new Error(t(state?.language, `apiBaseUrl no configurada para ${provider}.`, `apiBaseUrl not configured for ${provider}.`));
     const url = `${baseUrl.replace(/\/+$/, '')}/${pathValue.replace(/^\/+/, '')}`;
     const timeoutMs = Math.max(1000, Number.isFinite(Number(args.timeoutMs)) ? Number(args.timeoutMs) : 30000);
     const method = String(args.method || 'GET').toUpperCase();
-    const headers = buildApiHeaders(provider, profile, args.headers && typeof args.headers === 'object' ? args.headers : {});
+    const headers = useGh ? {} : buildApiHeaders(provider, profile, args.headers && typeof args.headers === 'object' ? args.headers : {});
     const bodyPreview = args.body && typeof args.body === 'object' ? JSON.stringify(args.body).slice(0, 200) : '';
     const allowed = await askConfirmation(state.rl, `Git API ${method}`, `${url}${bodyPreview ? `\nBody: ${bodyPreview}` : ''}\nTimeout: ${timeoutMs}ms`, paint, state);
     if (!allowed) return 'Request cancelado por el usuario.';
+    if (useGh) {
+      const { executeGithubCliApi } = require('../integrations/github-cli');
+      const result = await executeGithubCliApi({ path: pathValue, method, body: args.body }, { timeoutMs, signal: ctx?.signal });
+      return `GitHub CLI (${method}):\n${result}`;
+    }
     const axios = require('axios');
     const response = await axios({
       url,

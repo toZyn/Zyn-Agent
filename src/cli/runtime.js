@@ -448,6 +448,103 @@ async function main() {
 
   const rawArgs = process.argv.slice(2);
 
+  if (['--version', '-v', 'version'].includes(rawArgs[0])) {
+    console.log(`Zyn Agent v${require('../../package.json').version}`);
+    return;
+  }
+  if (rawArgs[0] === 'help') {
+    printHelp();
+    return;
+  }
+  if (rawArgs[0] === 'doctor') {
+    const { environmentReport } = require('./essentials');
+    console.log(await environmentReport({ cwd: process.cwd() }));
+    return;
+  }
+  if (rawArgs[0] === 'models') {
+    const { MODELS, listProvidersFromModels } = require('../config');
+    for (const provider of listProvidersFromModels(MODELS)) {
+      console.log(`${provider.key} (${provider.models.length} models)`);
+      for (const model of provider.models) console.log(`  ${model.key}: ${model.label}`);
+    }
+    return;
+  }
+  if (rawArgs[0] === 'sessions') {
+    const { listSessions } = require('../utils/sessionStorage');
+    const sessions = await listSessions();
+    if (!sessions.length) console.log('No saved Zyn sessions.');
+    else for (const session of sessions) console.log(`${session.sessionId}  ${session.title}  ${session.updatedAt}`);
+    return;
+  }
+  if (rawArgs[0] === 'tools') {
+    const { TOOL_DEFINITIONS } = require('../tools');
+    console.log(TOOL_DEFINITIONS.map(tool => tool.name).sort().join('\n'));
+    return;
+  }
+
+  if (rawArgs[0] === 'auth') {
+    const { loginCommandSpec, listAuthenticationStatus } = require('./essentials');
+    const provider = rawArgs[1];
+    const operation = rawArgs[2] || 'status';
+    if (provider === 'chatgpt') {
+      const { getChatGPTStatus, startChatGPTLogin, disconnectChatGPT } = require('../auth/chatgpt');
+      const { refreshChatGPTCatalog } = require('../providers/chatgpt');
+      if (operation === 'status') {
+        const status = await getChatGPTStatus();
+        console.log(JSON.stringify(status, null, 2));
+        return;
+      }
+      if (operation === 'login') {
+        const previous = await getChatGPTStatus();
+        const flow = await startChatGPTLogin({ reconnect: previous.connected });
+        console.log('Continue with ChatGPT. Opening your browser; use the link below if it does not open:');
+        console.log(flow.url);
+        require('../auth/browser').openChatGPTAuthBrowser(flow.url);
+        console.log('The URL uses a local 127.0.0.1 callback. For remote servers, secure port forwarding is required.');
+        const connected = await flow.done;
+        console.log(connected.sharing ? 'ChatGPT plan authorized for Zyn Agent.' : 'Signed in; ChatGPT plan usage was not authorized.');
+        if (connected.sharing) {
+          const models = await refreshChatGPTCatalog();
+          console.log(`Available ChatGPT models: ${models.length}`);
+          for (const model of models) console.log(`  ${model.slug}: ${model.label}`);
+        }
+        return;
+      }
+      if (operation === 'models') {
+        const models = await refreshChatGPTCatalog();
+        for (const model of models) console.log(`${model.slug}: ${model.label}`);
+        return;
+      }
+      if (operation === 'logout') {
+        const result = await disconnectChatGPT();
+        console.log(result.remoteRevoked ? 'ChatGPT disconnected and session revoked.' : 'ChatGPT local session cleared; verify disconnection in ChatGPT Settings.');
+        return;
+      }
+      throw new Error('Usage: zyn auth chatgpt [login|status|models|logout]');
+    }
+    if (provider && ['github','gmail','google'].includes(provider) && operation === 'logout') {
+      const { spawnSync } = require('node:child_process');
+      const command = provider === 'github' ? 'gh' : 'gws';
+      const argumentsList = provider === 'github' ? ['auth','logout','--hostname','github.com'] : ['auth','logout'];
+      const result = spawnSync(command, argumentsList, { stdio: 'inherit', timeout: 180000, env: process.env });
+      if (result.error) throw new Error(result.error.code === 'ENOENT' ? `${command} CLI is not installed` : result.error.message);
+      if (result.status !== 0) process.exitCode = result.status || 1;
+      return;
+    }
+    if (!provider || provider === 'status' || provider === 'list' || operation === 'status') {
+      const status = await listAuthenticationStatus();
+      console.log(JSON.stringify(provider && !['status','list'].includes(provider) ? { [provider]: status[provider] || null } : status, null, 2));
+      return;
+    }
+    if (operation !== 'login') throw new Error('Usage: zyn auth [status|list|chatgpt|github|gmail] [login|status|logout|models]');
+    const { spawnSync } = require('node:child_process');
+    const spec = loginCommandSpec(provider);
+    const result = spawnSync(spec.command, spec.args, { stdio: 'inherit', timeout: 180000, env: process.env });
+    if (result.error) throw new Error(result.error.code === 'ENOENT' ? `${spec.command} CLI is not installed` : result.error.message);
+    if (result.status !== 0) process.exitCode = result.status || 1;
+    return;
+  }
+
   if (rawArgs[0] === 'test') {
     await runTest();
     return;

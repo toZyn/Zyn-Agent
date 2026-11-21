@@ -10,3 +10,6 @@ data/chat/current-session.json
 
 __pycache__/
 *.pyc
+**/chatgpt/account.json
+**/chatgpt/host.json
+**/chatgpt/models.json
