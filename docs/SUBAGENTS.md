@@ -10,7 +10,7 @@ Claude Code's published documentation (https://code.claude.com/docs/en/sub-agent
 
 ## Zyn architecture
 
-`src/core/subagents.js` owns the per-session coordinator and child lifecycle. The parent can call `spawn_agent`, `wait_agent`, `list_agents`, `followup_agent`, `interrupt_agent`, and `close_agent` through the same tool registry as other agent actions. `/agents` displays active children; `/agents stop <id>` requests cancellation.
+`src/core/subagents.js` owns the per-session coordinator and child lifecycle. The parent can call `spawn_agent`, `wait_agent`, `list_agents`, `followup_agent`, `resume_agent`, `interrupt_agent`, and `close_agent` through the tool registry. `/agents` lists child statuses; `/agents stop <id>` requests cancellation. Use `/agents resume <id>` for an interrupted worker.
 
 Each child gets a new session ID and a separate saved history/transcript. The default `fork: none` carries only the task, selected model/provider configuration and workspace metadata. `fork: all` copies parent history and imported context rather than sharing mutable references. Children do not update the current-session pointer or global persistent settings. Child sessions are stored under the private chat subagents directory rather than being displayed as ordinary parent sessions.
 
@@ -20,10 +20,25 @@ Each worker runs through Zyn's existing model provider and agent-turn loop, not 
 
 ## Limitations and safety boundaries
 
-Workers share the same Node.js process, workspace and operating-system permissions. They are separate model sessions, **not** operating-system sandboxes or automatically isolated Git worktrees. The coordinator's live status and cancellation controls are process-local; after restarting Zyn, unfinished workers do not automatically resume. Running children consume actual model requests and are subject to provider context windows, quotas and rate limits. Offline tests exercise the coordinator and tool dispatcher with a simulated model; live multi-provider execution still requires end-to-end validation with explicit user authorization.
+Workers share the same Node.js process, workspace and operating-system permissions. They are separate model sessions, **not** operating-system sandboxes or automatically isolated Git worktrees. The coordinator keeps atomic state snapshots under `~/.zyn/chat/agent-runs` and child sessions under `~/.zyn/chat/subagents`. After a restart, an interrupted read-only worker resumes its last task with its saved history. Writable workers remain interrupted until the user explicitly confirms `/agents resume <id>` or the `resume_agent` tool. Recovery is restart-and-continue, not exactly-once execution; tasks already partly executed may need reconciliation. Running children consume actual model requests and are subject to provider context windows, quotas and rate limits. Offline tests exercise the coordinator and tool dispatcher with a simulated model; live multi-provider execution still requires end-to-end validation with explicit user authorization.
 
 Do not dispatch overlapping writable tasks to the same files. Prefer separate read-only exploration and review agents. Keep all external actions and file modifications behind the original user approval flow.
 
 ## Development verification
 
 Run `npm run test:all`. `tests/subagents.test.mjs` covers role permissions, history isolation, fork copying, concurrency, follow-up, cancellation and timeouts. `tests/subagents-persistence.test.mjs` checks that saving a child cannot change the parent's selected session or persistent settings. `tests/subagents-dispatch.test.mjs` checks the real tool-dispatch path without network credentials. Tests are intentionally offline and cannot prove live provider or mobile-emulator behavior.
+
+
+## Persistent specialists
+
+Definitions live in the user's private `~/.zyn/agents/<name>.json` directory, each with `name`, `role`, `description`, `instructions`, and optional `allowedTools`. They persist independently of sessions. Names are validated and file writes are atomic. A definition cannot increase permissions beyond its base role. The `spawn_agent` tool accepts `definition: "name"`.
+
+Use `/agents define storage-checker review Inspect disk usage without modifying files` to save a specialist. `/agents definitions` lists available definitions; `/agents show <name>` shows its configuration; `/agents delete <name>` requires user confirmation. The agent tools also support `list_agent_definitions`, `save_agent_definition` and `remove_agent_definition`, with confirmation for modifications.
+
+## Inter-agent messages
+
+`send_agent_message { agent_id, message }` routes a message to a child, peer, or parent using `agent_id: "parent"`. `read_agent_messages {}` drains the current agent's mailbox. Messages are stored with the parent coordinator and preserved across restarts. Child agents can read queued messages between model/tool steps; idle agents can receive them during a later follow-up. `/agents send <id> <message>` and `/agents inbox` expose the same channel to the user. Messages cannot bypass tool permissions.
+
+## Recovery boundaries
+
+The model requests remain real, separately metered provider calls. The coordinator uses in-process tasks, not isolated OS containers or Git worktrees. Graceful termination interrupts children and saves their recoverable state. Read-only tasks may run again after restart. General agents cannot invoke unrestricted plugin, MCP or account writes. File changes require the parent's confirmation. Pending work not checkpointed may need inspection before resumption.

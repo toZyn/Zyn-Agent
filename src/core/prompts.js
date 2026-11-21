@@ -522,6 +522,8 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       'Do not spawn agents, interact with the user directly, or expose credentials.',
       mode,
       'Role: ' + agent.role,
+      ...(agent.instructions ? ['# SPECIALIST INSTRUCTIONS', agent.instructions] : []),
+      'To coordinate with the parent or peers, use send_agent_message with agent_id: parent or a known agent ID. Incoming messages can be fetched using read_agent_messages; always report substantive findings to the parent.',
     );
   }
 

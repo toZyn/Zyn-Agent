@@ -1347,11 +1347,63 @@ async function runModelsFlow(state, deps) {
   }
 
   if (commandName === 'agents') {
-    const coordinator = require('../core/subagents').getCoordinator(state);
-    const [action, id] = args.split(/\s+/).filter(Boolean);
+    const { getCoordinator, ROLES } = require('../core/subagents');
+    const { defineAgent, readAgent, listDefinitions, removeDefinition } = require('../core/agent-definitions');
+    const coordinator = getCoordinator(state);
+    const words = String(args || '').trim().split(/\s+/).filter(Boolean);
+    const [action, id] = words;
     if (!action || action === 'list') {
-      const agents = coordinator.list();
-      console.log(agents.length ? agents.map(a => a.agent_id + ' [' + a.role + '] ' + a.status + ' · ' + a.task).join('\n') : 'No subagents in the current session.');
+      const active = coordinator.list();
+      console.log(active.length
+        ? active.map(a => a.agent_id.slice(0, 8) + '  ' + a.role.padEnd(7) + '  ' + a.status.padEnd(12) + '  ' + String(a.task || '').slice(0, 58)).join('\n')
+        : 'No subagents in the current session.');
+      return true;
+    }
+    if (action === 'definitions') {
+      const definitions = listDefinitions();
+      console.log(definitions.length
+        ? definitions.map(a => a.name.padEnd(22) + ' ' + a.role + '  ' + a.description).join('\n')
+        : 'No saved agent definitions.');
+      return true;
+    }
+    if (action === 'show') {
+      const definition = readAgent(id);
+      if (!definition) throw new Error('Unknown saved agent.');
+      console.log(JSON.stringify(definition, null, 2));
+      return true;
+    }
+    if (action === 'define') {
+      const match = String(args || '').match(/^define\s+([a-z][a-z0-9_-]+)\s+(explore|review|plan|general)\s+([\s\S]+)$/);
+      if (!match) throw new Error('Usage: /agents define <name> <explore|review|plan|general> <instructions>');
+      console.log('Saved specialist: ' + defineAgent({ name: match[1], role: match[2], instructions: match[3] }).name);
+      return true;
+    }
+    if (action === 'delete' && id) {
+      const approved = typeof state.tuiConfirm === 'function'
+        ? await state.tuiConfirm('Delete saved agent?', id) : false;
+      if (!approved) throw new Error('User approval required to delete saved agents.');
+      console.log(removeDefinition(id) ? 'Agent definition deleted.' : 'Definition not found.');
+      return true;
+    }
+    if (action === 'resume' && id) {
+      const agent = coordinator.lookup(id);
+      if (agent.role === 'general') {
+        const confirmed = typeof state.tuiConfirm === 'function'
+          ? await state.tuiConfirm('Resume writable agent?', 'This can retry actions after the previous interruption.')
+          : false;
+        if (!confirmed) throw new Error('Resuming writable work requires approval.');
+      }
+      console.log(JSON.stringify(coordinator.resume(id)));
+      return true;
+    }
+    if (action === 'send' && id) {
+      const message = String(args || '').split(/\s+/).slice(2).join(' ').trim();
+      console.log(JSON.stringify(coordinator.sendMessage('parent', id, message)));
+      return true;
+    }
+    if (action === 'inbox') {
+      const items = coordinator.readMessages('parent');
+      console.log(items.length ? items.map(x => x.from.slice(0, 8) + ': ' + x.content).join('\n') : 'No new subagent messages.');
       return true;
     }
     if (action === 'stop' && id) {
@@ -1362,7 +1414,7 @@ async function runModelsFlow(state, deps) {
       console.log(JSON.stringify(coordinator.close(id)));
       return true;
     }
-    throw new Error('Usage: /agents [list|stop <id>|close <id>]');
+    throw new Error('Usage: /agents [list|definitions|show <name>|define <name> <role> <instructions>|delete <name>|resume <id>|send <id> <message>|inbox|stop <id>|close <id>]');
   }
 
   if (commandName === 'transcript') {

@@ -61,3 +61,32 @@ test('tool dispatcher spawns, waits, lists, follows up and closes real child coo
     closeCoordinators();
   }
 });
+
+
+test('worker messages are delivered through the registered tool dispatcher',async()=>{
+  const session={...parent,sessionId:'worker-mailbox-test'};
+  const coordinator=getCoordinator(session);
+  coordinator.runTurn=async(task,child)=>{
+    const sent=JSON.parse(await executeToolCall({
+      tool:'send_agent_message',args:{agent_id:'parent',message:'Review completed: '+task},
+    },child,ui));
+    assert.equal(sent.delivered,true);
+    return {content:'done'};
+  };
+  try{
+    const child=JSON.parse(await executeToolCall({
+      tool:'spawn_agent',args:{role:'review',task:'Inspect tests'},
+    },session,ui));
+    assert.equal((await coordinator.wait(child.agent_id,2000)).status,'completed');
+    const mailbox=JSON.parse(await executeToolCall({tool:'read_agent_messages',args:{}},session,ui));
+    assert.equal(mailbox.length,1);
+    assert.equal(mailbox[0].from,child.agent_id);
+    assert.match(mailbox[0].content,/Review completed/);
+    assert.deepEqual(JSON.parse(await executeToolCall({tool:'read_agent_messages',args:{}},session,ui)),[]);
+    const sent=JSON.parse(await executeToolCall({
+      tool:'send_agent_message',args:{agent_id:child.agent_id,message:'Please verify again'},
+    },session,ui));
+    assert.equal(sent.delivered,true);
+    assert.deepEqual(coordinator.lookup(child.agent_id).state.getQueuedMessages(),['Message from parent: Please verify again']);
+  }finally{closeCoordinators();}
+});

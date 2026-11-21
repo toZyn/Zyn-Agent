@@ -1571,6 +1571,18 @@ export async function startTUI(options = {}) {
   state.tuiAskUser = (question, allItems, customLabel) => store.requestAskUser(question, allItems, customLabel);
 
   try {
+    const restoredAgents = require('../core/subagents').getCoordinator(state).list();
+    if (restoredAgents.length) {
+      const active = restoredAgents.filter(a => a.status === 'running').length;
+      store.addEvent('info', active
+        ? uiText('Recovered agent sessions · ' + active + ' resuming', 'Sesiones de agentes recuperadas · ' + active + ' reanudando')
+        : uiText('Recovered ' + restoredAgents.length + ' agent sessions', 'Recuperadas ' + restoredAgents.length + ' sesiones de agentes'));
+    }
+  } catch (error) {
+    store.addEvent('warn', uiText('Agent recovery unavailable', 'Recuperación de agentes no disponible'), String(error.message || error));
+  }
+
+  try {
     const fs = require('fs');
     const { MCP_CONFIG_FILE } = require('../config');
     const mcpConfigPath = MCP_CONFIG_FILE;

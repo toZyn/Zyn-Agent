@@ -98,19 +98,25 @@ const TOOL_DEFINITIONS = [
   { name: 'load_skill', usage: '{ name, resource? }' },
   { name: 'memory', usage: '{ action, key?, value?, query? }' },
   { name: 'ask_user', usage: '{ question, options }' },
-  { name: 'spawn_agent', usage: '{ task, role?: "explore"|"review"|"plan"|"general", fork?: "none"|"all" }' },
+  { name: 'spawn_agent', usage: '{ task, role?, definition?, fork? }' },
   { name: 'wait_agent', usage: '{ agent_id, timeout_ms? }' },
   { name: 'list_agents', usage: '{}' },
   { name: 'followup_agent', usage: '{ agent_id, task }' },
   { name: 'interrupt_agent', usage: '{ agent_id }' },
   { name: 'close_agent', usage: '{ agent_id }' },
+  { name: 'resume_agent', usage: '{ agent_id }' },
+  { name: 'send_agent_message', usage: '{ agent_id, message }' },
+  { name: 'read_agent_messages', usage: '{}' },
+  { name: 'list_agent_definitions', usage: '{}' },
+  { name: 'save_agent_definition', usage: '{ name, role, instructions, description?, allowedTools? }' },
+  { name: 'remove_agent_definition', usage: '{ name }' },
 ];
 const REGISTERED_TOOLS = new Set(TOOL_DEFINITIONS.map(tool => tool.name));
 
 function getToolPromptText() {
   return [
     '## Delegation and subagents',
-    'spawn_agent { task, role?, fork? } - Start a bounded independent subagent for a scoped task; default role explore, default fork none.',
+    'spawn_agent { task, role?, definition?, fork? } - Start an isolated worker; definition is a saved specialist name, or role is explore/review/plan/general.',
     '  Roles: explore, review, plan (read-only); general (writes require the original user approval).',
     '  Spawn only when user explicitly authorizes delegation or subagents. Avoid overlapping writable tasks.',
     'wait_agent { agent_id, timeout_ms? } - Wait up to 60000 ms for completion, return status and summary.',
@@ -118,6 +124,13 @@ function getToolPromptText() {
     'followup_agent { agent_id, task } - Continue an idle/completed child with its own context.',
     'interrupt_agent { agent_id } - Cancel a running child.',
     'close_agent { agent_id } - Release a child.',
+    'resume_agent { agent_id } - Recover an interrupted worker. Writable roles require explicit parent confirmation.',
+    'send_agent_message { agent_id, message } - Send a scoped message to parent or to another worker ID.',
+    'read_agent_messages {} - Retrieve messages sent to this agent from other agents.',
+    'list_agent_definitions {} - List persistent specialized agents.',
+    'save_agent_definition { name, role, instructions, description?, allowedTools? } - Save a reusable specialist, after user approval.',
+    'remove_agent_definition { name } - Remove a reusable specialist, after user approval.',
+
     '',
     '## Lectura y navegacion',
     '',
@@ -1552,17 +1565,47 @@ async function executeToolCall(call, state, ui, options = {}) {
       case 'wait_agent':
       case 'list_agents':
       case 'followup_agent':
+      case 'resume_agent':
       case 'interrupt_agent':
-      case 'close_agent': {
-        const coordinator = require('../core/subagents').getCoordinator(state);
+      case 'close_agent':
+      case 'send_agent_message':
+      case 'read_agent_messages':
+      case 'list_agent_definitions':
+      case 'save_agent_definition':
+      case 'remove_agent_definition': {
+        const { getCoordinator } = require('../core/subagents');
+        const { defineAgent, listDefinitions, removeDefinition } = require('../core/agent-definitions');
+        const coordinator = getCoordinator(state);
         const args = call.args || {};
+        const sender = state.__subagent?.agentId || 'parent';
         let data;
         if (call.tool === 'spawn_agent') data = coordinator.spawn(state, args);
         if (call.tool === 'wait_agent') data = await coordinator.wait(args.agent_id, args.timeout_ms);
         if (call.tool === 'list_agents') data = coordinator.list();
         if (call.tool === 'followup_agent') data = await coordinator.followup(args.agent_id, args.task);
+        if (call.tool === 'resume_agent') {
+          const agent = coordinator.lookup(args.agent_id);
+          if (agent.role === 'general') {
+            const approved = typeof state.tuiConfirm === 'function'
+              ? await state.tuiConfirm('Resume writable subagent?', 'This may retry previous actions. Review the child transcript before confirming.')
+              : false;
+            if (!approved) throw new Error('Resuming a writable subagent requires explicit user confirmation.');
+          }
+          data = coordinator.resume(args.agent_id);
+        }
         if (call.tool === 'interrupt_agent') data = coordinator.interrupt(args.agent_id);
         if (call.tool === 'close_agent') data = coordinator.close(args.agent_id);
+        if (call.tool === 'send_agent_message') data = coordinator.sendMessage(sender, args.agent_id || 'parent', args.message);
+        if (call.tool === 'read_agent_messages') data = coordinator.readMessages(sender);
+        if (call.tool === 'list_agent_definitions') data = listDefinitions();
+        if (call.tool === 'save_agent_definition' || call.tool === 'remove_agent_definition') {
+          if (state.__subagent) throw new Error('Only the parent session can manage definitions.');
+          const approved = typeof state.tuiConfirm === 'function'
+            ? await state.tuiConfirm(call.tool === 'save_agent_definition' ? 'Save agent definition?' : 'Delete saved agent definition?', String(args.name || ''))
+            : false;
+          if (!approved) throw new Error('User approval required for agent definitions.');
+          data = call.tool === 'save_agent_definition' ? defineAgent(args) : { name: args.name, removed: removeDefinition(args.name) };
+        }
         result = JSON.stringify(data, null, 2);
         break;
       }
