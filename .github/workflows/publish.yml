@@ -2,19 +2,47 @@ name: Publish to npm (manual approval only)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
+    if: "github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'npm: publish v1.7.0 via existing workflow'"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v1.7.0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org/'
+      - run: npm install --global 'npm@^11.5.1'
       - run: npm ci
       - run: npm run test:all
-      - run: npm publish --access public
+      - name: Verify exact GitHub release
+        run: |
+          set -euo pipefail
+          test "$(node -p 'require("./package.json").version')" = '1.7.0'
+          test "$(git rev-parse HEAD)" = '4cd4a1713bbe4ad49f0ad13298c91113dfc9901b'
+      - name: Configure existing npm token only if present
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if test -n "${NPM_TOKEN:-}"; then
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+            chmod 600 "$HOME/.npmrc"
+          fi
+      - name: Publish zyn-ai v1.7.0
+        run: |
+          set -euo pipefail
+          if npm view zyn-ai@1.7.0 version --json >/dev/null 2>&1; then
+            echo 'Already published on npm.'
+          else
+            npm publish --access public --provenance
+          fi
