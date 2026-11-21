@@ -9,6 +9,18 @@ function toolIsReadOnly(call) {
   return false;
 }
 function assertToolAllowed(call,state){
+  if(state?.__subagent){
+    const meta=state.__subagent;
+    if(['spawn_agent','wait_agent','list_agents','followup_agent','interrupt_agent','close_agent','ask_user'].includes(call?.tool)) {
+      throw new Error('Subagents cannot control other agents or prompt the user directly.');
+    }
+    if(Array.isArray(meta.allowedTools) && !meta.allowedTools.includes(call?.tool)) {
+      throw new Error('This subagent role does not allow the requested tool.');
+    }
+    if(meta.role!=='general' && !toolIsReadOnly(call)) {
+      throw new Error('Read-only subagent role cannot modify the workspace.');
+    }
+  }
   if(state?.settings?.planMode && !toolIsReadOnly(call))throw new Error(`Plan mode is read-only: ${call?.tool||'unknown'} is not permitted. Disable /plan first.`);
 }
 module.exports={toolIsReadOnly,assertToolAllowed};

@@ -261,8 +261,10 @@ async function saveState(state) {
     theme: state.theme || 'dark',
     settings: state.settings || {},
   });
-  await setCurrentSessionId(state.sessionId);
-  await savePersistentConfig(state);
+  if (!state.__subagent) {
+    await setCurrentSessionId(state.sessionId);
+    await savePersistentConfig(state);
+  }
 }
 
 async function applyPersistentConfig(state) {

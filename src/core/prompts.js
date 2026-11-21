@@ -512,6 +512,19 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       projectInstructions);
   }
 
+  if (state.__subagent) {
+    const agent = state.__subagent;
+    const mode = agent.role === 'general'
+      ? 'All changes require explicit parent-session permission approval. Never bypass confirmations.'
+      : 'You are a read-only subagent. Do not write, run shell commands, or invoke actions that change files or accounts.';
+    parts.push('', '# SUBAGENT EXECUTION',
+      'You are a delegated specialist. Work only on the scoped task; maintain an independent context and return a concise evidence-based result.',
+      'Do not spawn agents, interact with the user directly, or expose credentials.',
+      mode,
+      'Role: ' + agent.role,
+    );
+  }
+
   if (state.personaPrompt && state.personaPrompt.trim()) {
     parts.push(
       '',

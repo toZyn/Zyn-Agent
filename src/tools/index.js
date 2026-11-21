@@ -98,11 +98,27 @@ const TOOL_DEFINITIONS = [
   { name: 'load_skill', usage: '{ name, resource? }' },
   { name: 'memory', usage: '{ action, key?, value?, query? }' },
   { name: 'ask_user', usage: '{ question, options }' },
+  { name: 'spawn_agent', usage: '{ task, role?: "explore"|"review"|"plan"|"general", fork?: "none"|"all" }' },
+  { name: 'wait_agent', usage: '{ agent_id, timeout_ms? }' },
+  { name: 'list_agents', usage: '{}' },
+  { name: 'followup_agent', usage: '{ agent_id, task }' },
+  { name: 'interrupt_agent', usage: '{ agent_id }' },
+  { name: 'close_agent', usage: '{ agent_id }' },
 ];
 const REGISTERED_TOOLS = new Set(TOOL_DEFINITIONS.map(tool => tool.name));
 
 function getToolPromptText() {
   return [
+    '## Delegation and subagents',
+    'spawn_agent { task, role?, fork? } - Start a bounded independent subagent for a scoped task; default role explore, default fork none.',
+    '  Roles: explore, review, plan (read-only); general (writes require the original user approval).',
+    '  Spawn only when user explicitly authorizes delegation or subagents. Avoid overlapping writable tasks.',
+    'wait_agent { agent_id, timeout_ms? } - Wait up to 60000 ms for completion, return status and summary.',
+    'list_agents {} - List current session child agents and statuses.',
+    'followup_agent { agent_id, task } - Continue an idle/completed child with its own context.',
+    'interrupt_agent { agent_id } - Cancel a running child.',
+    'close_agent { agent_id } - Release a child.',
+    '',
     '## Lectura y navegacion',
     '',
     'list_dir { path? }',
@@ -1532,6 +1548,24 @@ async function executeToolCall(call, state, ui, options = {}) {
 
   try {
     switch (call.tool) {
+      case 'spawn_agent':
+      case 'wait_agent':
+      case 'list_agents':
+      case 'followup_agent':
+      case 'interrupt_agent':
+      case 'close_agent': {
+        const coordinator = require('../core/subagents').getCoordinator(state);
+        const args = call.args || {};
+        let data;
+        if (call.tool === 'spawn_agent') data = coordinator.spawn(state, args);
+        if (call.tool === 'wait_agent') data = await coordinator.wait(args.agent_id, args.timeout_ms);
+        if (call.tool === 'list_agents') data = coordinator.list();
+        if (call.tool === 'followup_agent') data = await coordinator.followup(args.agent_id, args.task);
+        if (call.tool === 'interrupt_agent') data = coordinator.interrupt(args.agent_id);
+        if (call.tool === 'close_agent') data = coordinator.close(args.agent_id);
+        result = JSON.stringify(data, null, 2);
+        break;
+      }
       case 'list_dir':
         result = await listDirTool(call.args, state, ctx);
         break;

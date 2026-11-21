@@ -63,6 +63,7 @@ const SLASH_COMMANDS = [
   { name: 'auth', desc: 'connect ChatGPT plan, GitHub and Gmail', descEs: 'conectar plan ChatGPT, GitHub y Gmail' },
   { name: 'doctor', desc: 'diagnose setup and authentication', descEs: 'diagnosticar el entorno' },
   { name: 'tools', desc: 'list actual agent tools', descEs: 'listar herramientas reales' },
+  { name: 'agents', desc: 'list and manage subagents', descEs: 'listar y administrar subagentes' },
   { name: 'permissions', desc: 'inspect and change approval mode', descEs: 'gestionar aprobaciones' },
   { name: 'plan', desc: 'enforced read-only planning', descEs: 'planificar en solo lectura' },
   { name: 'init', desc: 'create project AGENTS.md', descEs: 'crear AGENTS.md del proyecto' },
@@ -1343,6 +1344,25 @@ async function runModelsFlow(state, deps) {
     });
     console.log(state.cwd);
     return true;
+  }
+
+  if (commandName === 'agents') {
+    const coordinator = require('../core/subagents').getCoordinator(state);
+    const [action, id] = args.split(/\s+/).filter(Boolean);
+    if (!action || action === 'list') {
+      const agents = coordinator.list();
+      console.log(agents.length ? agents.map(a => a.agent_id + ' [' + a.role + '] ' + a.status + ' · ' + a.task).join('\n') : 'No subagents in the current session.');
+      return true;
+    }
+    if (action === 'stop' && id) {
+      console.log(JSON.stringify(coordinator.interrupt(id)));
+      return true;
+    }
+    if (action === 'close' && id) {
+      console.log(JSON.stringify(coordinator.close(id)));
+      return true;
+    }
+    throw new Error('Usage: /agents [list|stop <id>|close <id>]');
   }
 
   if (commandName === 'transcript') {

@@ -1569,7 +1569,10 @@ export async function startTUI(options = {}) {
       }
     } catch {}
   };
-  const mcpCleanup = () => { try { require('../mcp/client').stopAllStdioServers(); } catch {} };
+  const mcpCleanup = () => {
+    try { require('../core/subagents').closeCoordinators(); } catch {}
+    try { require('../mcp/client').stopAllStdioServers(); } catch {}
+  };
   process.on('SIGINT', () => { mcpCleanup(); saveStateSafe(); process.exit(0); });
   process.on('SIGTERM', () => { mcpCleanup(); saveStateSafe(); process.exit(0); });
   process.on('exit', () => { mcpCleanup(); saveStateSafe(); });
