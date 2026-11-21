@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   prune:
-    if: github.repository == 'toZyn/Zyn-Agent' && github.event.head_commit.message == 'chore: run one-time branch cleanup'
+    if: github.repository == 'toZyn/Zyn-Agent' && contains(github.event.head_commit.message, 'one-time branch cleanup')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
