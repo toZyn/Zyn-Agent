@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { appendVisibleItem } from './viewport.mjs';
+import { transcriptViewport } from './transcript-view.mjs';
 import { shortTextPreview } from './format.mjs';
 
 const require = createRequire(import.meta.url);
@@ -22,6 +23,7 @@ export class UIStore extends EventEmitter {
     this.authFlow = null;
     this.selectRequest = null;
     this.inputRequest = null;
+    this.transcriptView = null;
     this.lastUserMessage = '';
     this.inputDraft = '';
     this.turnCount = 0;
@@ -196,6 +198,29 @@ export class UIStore extends EventEmitter {
   setAuthFlow(flow) {
     this.authFlow = flow;
     this._emit();
+  }
+
+  openTranscript(text) {
+    this.transcriptView = Array.isArray(text) && text.some(value => value && typeof value === 'object')
+      ? { entries: text, offset: 0 }
+      : { text: Array.isArray(text) ? text.join('\n') : String(text || ''), offset: 0 };
+    this._emit();
+  }
+
+  closeTranscript() {
+    if (!this.transcriptView) return;
+    this.transcriptView = null;
+    this._emit();
+  }
+
+  scrollTranscript(delta, width = 80, height = 24) {
+    if (!this.transcriptView) return;
+    const page = transcriptViewport(this.transcriptView, width, height);
+    const next = Math.max(0, Math.min(page.maxOffset, page.offset + delta));
+    if (next !== this.transcriptView.offset) {
+      this.transcriptView.offset = next;
+      this._emit();
+    }
   }
 
   requestConfirm(title, detail) {

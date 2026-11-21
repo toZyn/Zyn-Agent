@@ -30,7 +30,7 @@ npm start
 
 ## First launch and imported memory
 
-On the first interactive launch, Zyn offers an **optional** profile import. The screen shows a three-line preview of the export prompt, never the entire prompt by default. Press `C` and Enter to copy it to the clipboard (Termux API, a supported desktop clipboard, or terminal OSC52), then `P` and Enter to paste the export. Complete the import with `:save`, or cancel with `:cancel`. If the pasted text does not contain the required export sections, Zyn explains the problem and lets you paste it again without exiting. Clipboard support is terminal-dependent and explicitly reported as unverified when it cannot be confirmed.
+On the first interactive launch, Zyn offers an **optional** profile import. Press `Y` to import or Enter to skip. If importing, press `C` and Enter to copy the export prompt when needed (Termux API, supported desktop clipboard, or terminal OSC52), paste the response directly into the terminal, and press Enter on a blank line to finish. No second paste menu or `:save` command is required. `N` skips the import. The prompt is not printed in full by default. Invalid exports can be pasted again without exiting. The setup screen uses the terminal theme saved in Zyn settings. Clipboard support is terminal-dependent; copying may not be verifiable.
 
 The import remains on your machine until you choose to use a model. New Zyn sessions receive a copy of the imported profile, and resumed sessions use their stored copy. Profiles are treated as **user-provided context, not trusted instructions**. They may be sent to the selected model provider as part of the model's prompt. Review exported content and remove information you do not want to share before importing it.
 
@@ -91,7 +91,7 @@ Zyn uses model-specific context metadata when the provider supplies it. If the p
 
 The defaults for `max-tool-steps`, `max-history` and `max-output` are now `0`, which means **no arbitrary application-level cap** for those settings. Users can set an explicit limit with `/settings` to manage machine resources. Repeated identical tool calls that produce no progress trigger a protective pause. Normal permission approval, provider request timeouts, file-reading pagination and context-size constraints remain in effect.
 
-On mobile terminals, the framed header and colored activity indicators use the existing theme palette. Long tool output is summarized in the live viewport while the original tool result remains available in `/transcript`. The scroll viewport uses the displayed summary height rather than treating every hidden character as an extra terminal row.
+On mobile terminals, the framed header and colored activity indicators use the existing theme palette. Long tool output is summarized in the live viewport; `/transcript` opens a separate, scrollable preview of recent session events, while `/export` preserves the full transcript in a file. The conversation starts at the top of the available history area, and the input remains at the bottom; the transcript viewer uses a separate scroll area instead of mixing raw logs into messages.
 
 ## Universal Agent Skills
 

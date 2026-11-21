@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { USER_DATA_ROOT } = require('../config');
+const { USER_DATA_ROOT, PERSISTENT_CONFIG_FILE } = require('../config');
 
 const PROFILE_FILE = path.join(USER_DATA_ROOT, 'chat', 'imported-memory.md');
 const ONBOARDING_FILE = path.join(USER_DATA_ROOT, 'chat', 'onboarding.json');
@@ -138,49 +138,108 @@ async function collectMemoryExport(rl, output = console.log) {
   return null;
 }
 
-function styleTerminal(text, color, output) {
+function styleTerminal(text, role, output, theme) {
   if (!output?.isTTY || process.env.NO_COLOR !== undefined || process.env.TERM === 'dumb') return text;
-  const colors = { accent: '36', warn: '33', success: '32', subtle: '2', title: '1;36' };
-  return `\x1b[${colors[color] || '0'}m${text}\x1b[0m`;
+  const palette = {
+    accent: theme?.accent,
+    title: theme?.accent,
+    border: theme?.accentDim || theme?.borderLight,
+    subtle: theme?.textMuted,
+    text: theme?.text,
+    warn: theme?.amber,
+    success: theme?.green,
+  };
+  const value = palette[role] || theme?.text || '#ffffff';
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value);
+  if (!match) return text;
+  const rgb = match.slice(1).map(value => parseInt(value, 16));
+  return `\x1b[38;2;${rgb.join(';')}m${text}\x1b[39m`;
 }
 
-function renderOnboardingIntro(output, language, columns) {
+async function getOnboardingTheme() {
+  const { getTheme } = await import('../tui/themes.mjs');
+  let name = 'dark';
+  try {
+    const saved = JSON.parse(await fs.promises.readFile(PERSISTENT_CONFIG_FILE, 'utf8'));
+    if (typeof saved.theme === 'string') name = saved.theme;
+  } catch {}
+  return getTheme(name);
+}
+
+function renderBox(title, lines, width, theme, output) {
+  const w = Math.max(26, Math.min(68, Math.floor(width || 64) - 4));
+  const inner = w - 4;
+  const row = (line, role) => styleTerminal(`│ ${String(line).slice(0, inner).padEnd(inner)} │`, role, output, theme);
+  const edge = (start, end) => styleTerminal(start + '─'.repeat(w - 2) + end, 'border', output, theme);
+  return [edge('╭', '╮'), row(title, 'title'), ...lines.map(({value,role}) => row(value,role || 'subtle')), edge('╰','╯')].join('\n');
+}
+
+function renderOnboardingIntro(output, language, columns, theme) {
   const es = language === 'es';
-  const width = Math.max(30, Math.min(70, (columns || 64) - 4));
-  const inner = width - 4;
-  const lines = [
-    es ? 'Zyn · Configuración inicial' : 'Zyn · Optional setup',
-    es ? '¿Importar tu perfil de otra aplicación?' : 'Import your profile from another app?',
-    es ? 'Puedes omitirlo y configurarlo después.' : 'Optional. You can configure it later.',
-  ];
-  const row = value => `│ ${String(value).slice(0, inner).padEnd(inner)} │`;
-  const border = char => char + '─'.repeat(width - 2) + (char === '╭' ? '╮' : '╯');
-  const content = [border('╭'), ...lines.map(row), border('╰')];
-  return content.map((line, i) => styleTerminal(line, i === 1 ? 'title' : i === 2 ? 'subtle' : 'accent', output)).join('\n');
+  return renderBox(es ? 'Zyn · Configuración opcional' : 'Zyn · Optional setup', [
+    {value:es ? '¿Importar memoria de otra aplicación?' : 'Import memory from another app?',role:'text'},
+    {value:es ? '[Y] Importar      [Enter] Omitir' : '[Y] Import      [Enter] Skip',role:'accent'},
+  ],columns,theme,output);
 }
 
-function renderMemoryPrompt(output, prompt, columns, language) {
-  const lines = formatOnboardingPreview(prompt, columns, language).split('\n');
-  return lines.map((line, index) => {
-    const color = index === 0 ? 'title' : index === lines.length - 1 ? 'success' : line.startsWith('│') ? 'subtle' : 'accent';
-    return styleTerminal(line, color, output);
-  }).join('\n');
+function renderImportInstructions(output, language, columns, theme) {
+  const es = language === 'es';
+  return renderBox(es ? 'Zyn · Importar memoria' : 'Zyn · Import memory', [
+    {value:es ? '[C] Copiar prompt de exportación' : '[C] Copy export prompt',role:'accent'},
+    {value:es ? 'Pega el resultado aquí debajo.' : 'Paste the exported response below.',role:'text'},
+    {value:es ? 'Enter vacío: guardar · [N] Omitir' : 'Empty Enter: save · [N] Skip',role:'subtle'},
+  ],columns,theme,output);
 }
 
-async function collectValidatedMemoryExport(rl, output, lang = 'en') {
+function hasCompletedPreferences(text) {
+  const match = String(text).match(/^## PREFERENCES\s*$/m);
+  if (!match) return false;
+  const remaining = text.slice(match.index + match[0].length);
+  return remaining.split('\n').some(line => {
+    const t = line.trim();
+    return t && !/^(?:#{1,6}\s|```|---|\*\*|\[)/.test(t);
+  });
+}
+
+async function collectValidatedMemoryExport(rl, output, lang = 'en', theme, copy = require('./clipboard').copyToClipboard) {
   const es = lang === 'es';
   let lines = [];
   let bytes = 0;
-  output.write(es ? '  Pega la exportación. Escribe :save para guardar o :cancel para salir.\n' : '  Paste the export. Type :save to save or :cancel to skip.\n');
+  let emitted = 0;
+  let consumed = 0;
+  const onLine = () => { emitted++; };
+  rl.on('line', onLine);
+  try {
   for await (const line of rl) {
-    if (line.trim() === ':cancel') return null;
-    if (line.trim() === ':save') {
+    consumed++;
+    const trimmed = line.trim();
+    if (!lines.length && /^(?:n|skip|omitir)$/i.test(trimmed)) return null;
+    if (!lines.length && /^c$/i.test(trimmed)) {
+      const result = copy(EXPORT_PROMPT, { output });
+      const notice = result.verified
+        ? (es ? 'Prompt copiado.' : 'Prompt copied.')
+        : (es ? 'Copia solicitada; verifica el portapapeles.' : 'Copy requested; check your clipboard.');
+      output.write(styleTerminal(`  ${notice}\n`, 'subtle', output, theme));
+      continue;
+    }
+    if (trimmed === '') {
+      if (!lines.length) continue;
+      if (emitted === consumed) await new Promise(resolve => setTimeout(resolve, 210));
+      if (emitted > consumed) {
+        lines.push(line);
+        continue;
+      }
+      const draft = lines.join('\n');
+      if (/^## MEMORIES\s*$/m.test(draft) && !hasCompletedPreferences(draft)) {
+        lines.push(line);
+        continue;
+      }
       try {
-        const clean = parseImportedMemory(lines.join('\n'));
+        const clean = parseImportedMemory(draft);
         await saveImportedProfile(clean);
         return clean;
-      } catch (error) {
-        output.write(styleTerminal(es ? '  Invalid export. Debe contener ## MEMORIES y ## PREFERENCES. Vuelve a pegarla o escribe :cancel.\n' : '  Invalid export. Include ## MEMORIES and ## PREFERENCES. Paste the full export again, or type :cancel.\n', 'warn', output));
+      } catch {
+        output.write(styleTerminal(es ? '  Exportación no válida. Pega el contenido completo otra vez.\n' : '  Invalid export. Paste the complete response again.\n', 'warn', output, theme));
         lines = [];
         bytes = 0;
         continue;
@@ -190,50 +249,35 @@ async function collectValidatedMemoryExport(rl, output, lang = 'en') {
     if (bytes > MAX_IMPORT_BYTES) {
       lines = [];
       bytes = 0;
-      output.write(styleTerminal(es ? '  Exportación demasiado grande; pega una versión más pequeña.\n' : '  Export exceeds the import size limit; paste a smaller export.\n', 'warn', output));
+      output.write(styleTerminal(es ? '  El texto es demasiado grande para importarlo.\n' : '  Export is too large to import.\n', 'warn', output, theme));
       continue;
     }
     lines.push(line);
   }
   return null;
+  } finally { rl.off('line', onLine); }
 }
 
 async function firstRunMemoryOnboarding({ input = process.stdin, output = process.stdout, ask, readLines, copy = require('./clipboard').copyToClipboard, language } = {}) {
   if (!input.isTTY || !output.isTTY || await hasSeenMemoryOnboarding()) return false;
   const { DEFAULT_LANGUAGE } = require('../config');
   const lang = language || DEFAULT_LANGUAGE;
-  const es = lang === 'es';
+  const theme = await getOnboardingTheme();
   const readline = require('node:readline/promises');
   const rl = readline.createInterface({ input, output, terminal: true });
   try {
-    output.write('\n' + renderOnboardingIntro(output, lang, output.columns) + '\n' + styleTerminal(es ? '  [Y] Importar     [N] Omitir' : '  [Y] Import     [N] Skip', 'success', output) + '\n');
+    output.write(`\n${renderOnboardingIntro(output, lang, output.columns, theme)}\n`);
     const response = ask ? await ask(rl) : await rl.question('  › ');
     if (!/^(s|si|sí|y|yes)$/i.test(String(response).trim())) {
       await markMemoryOnboarding();
       return false;
     }
-    const columns = output.columns || 64;
-    output.write(`\n${renderMemoryPrompt(output, EXPORT_PROMPT, columns, lang)}\n`);
-    while (true) {
-      const choice = (await rl.question(es ? '  [C] Copiar  [P] Pegar  [N] Omitir: ' : '  [C] Copy  [P] Paste  [N] Skip: ')).trim().toLowerCase();
-      if (choice === 'n' || choice === ':cancel') { await markMemoryOnboarding(); return false; }
-      if (choice === 'c') {
-        const result = copy(EXPORT_PROMPT, { output });
-        output.write(result.verified
-          ? (es ? '  ✓ Prompt copiado al portapapeles.\n' : '  ✓ Full prompt copied to clipboard.\n')
-          : (result.method === 'OSC52'
-              ? (es ? '  Copia solicitada al terminal (OSC52); depende de la compatibilidad.\n' : '  Clipboard request sent to terminal (OSC52); support varies.\n')
-              : (es ? '  Portapapeles no disponible; usa zyn memory prompt.\n' : '  Clipboard unavailable; use zyn memory prompt.\n')));
-        continue;
-      }
-      if (choice === 'p' || choice === '') break;
-      output.write(es ? '  Selecciona C, P o N.\n' : '  Choose C, P or N.\n');
-    }
-    const pasted = readLines ? await readLines(rl) : await collectValidatedMemoryExport(rl, output, lang);
+    output.write(`\n${renderImportInstructions(output, lang, output.columns, theme)}\n  › `);
+    const pasted = readLines ? await readLines(rl) : await collectValidatedMemoryExport(rl, output, lang, theme, copy);
     if (pasted === null) return false;
     if (readLines) await saveImportedProfile(pasted);
     await markMemoryOnboarding();
-    output.write(es ? '  ✓ Memoria guardada para las nuevas sesiones.\n' : '  ✓ Profile saved for future sessions.\n');
+    output.write(styleTerminal(lang === 'es' ? '  Memoria importada.\n' : '  Profile saved for future sessions.\n','success',output,theme));
     return true;
   } finally { rl.close(); }
 }

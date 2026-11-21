@@ -7,13 +7,14 @@ class RecoveryTests(unittest.TestCase):
         term=Terminal(cols=64,rows=23,env_extra={'ZYN_SKIP_ONBOARDING':'0'},wait_ready=False)
         try:
             term.send(b'y\n',0.3)
-            self.assertIn('Here is the following prompt',term.text)
-            term.send(b'p\n',0.2)
-            term.send(b'b\n:save\n',0.4)
+            self.assertIn('Paste',term.text)
+            self.assertNotIn('[P] Paste',term.text)
+            self.assertNotIn(':save',term.text)
+            term.send(b'b\n\n',0.4)
             self.assertIn('Invalid export',term.text)
             self.assertIsNone(term.proc.poll())
-            doc=b'## MEMORIES\n### Personal Context\n1. Test\n## PREFERENCES\n### Tone\n1. Clear\n:save\n'
-            term.send(doc,0.5)
+            doc=b'## MEMORIES\n### Personal Context\n1. Test\n\n## PREFERENCES\n### Tone\n1. Clear\n\n'
+            term.send(doc,0.6)
             self.assertIn('Profile saved for future sessions',term.text)
             self.assertIn('Test',(Path(term.tmp.name)/'chat'/'imported-memory.md').read_text())
             term.send(b'/exit\r',0.3)
@@ -24,11 +25,23 @@ class RecoveryTests(unittest.TestCase):
         term=Terminal(cols=64,rows=23,env_extra={'ZYN_SKIP_ONBOARDING':'0'},wait_ready=False)
         try:
             term.send(b'y\n',0.4)
-            self.assertIn('Here is the following prompt',term.text)
-            self.assertIn('┌',term.text)
-            self.assertIn('│',term.text)
+            self.assertIn('Paste',term.text)
+            self.assertIn('╭',term.text)
             self.assertIn(b'\x1b[',term.capture)
             self.assertRegex(term.capture.decode('utf8','replace'),r'\x1b\[[0-9;]*m')
+        finally:term.close()
+
+    def test_onboarding_uses_persisted_dracula_theme(self):
+        import json
+        def prepare(directory):
+            config=directory/'chat'/'persistent-config.json'
+            config.parent.mkdir(parents=True,exist_ok=True)
+            config.write_text(json.dumps({'theme':'dracula','language':'en'}))
+        term=Terminal(cols=64,rows=23,prepare=prepare,env_extra={'ZYN_SKIP_ONBOARDING':'0'},wait_ready=False)
+        try:
+            self.assertIn(b'\x1b[38;2;255;121;198m',term.capture)
+            term.send(b'y\n',0.3)
+            self.assertIn(b'\x1b[38;2;255;121;198m',term.capture)
         finally:term.close()
 
     def test_banner_restores_framed_design_and_accent_color(self):
@@ -75,4 +88,26 @@ class RecoveryTests(unittest.TestCase):
             self.assertNotIn(b'\x1b[2J',term.capture)
             term.send(b'\x03',0.3)
             self.assertEqual(term.wait_exit(),0)
+        finally:term.close()
+
+    def test_multisection_paste_does_not_save_before_last_preference(self):
+        term=Terminal(cols=72,rows=26,env_extra={'ZYN_SKIP_ONBOARDING':'0'},wait_ready=False)
+        try:
+            term.send(b'y\n',0.3)
+            pasted=b'## MEMORIES\n### Work Context\n1. Developer\n\n## PREFERENCES\n### Tone\n1. Professional\n\n### Avoid\n1. No childish wording\n\n'
+            term.send(pasted,0.65)
+            self.assertIn('Profile saved for future sessions',term.text)
+            saved=(Path(term.tmp.name)/'chat'/'imported-memory.md').read_text()
+            self.assertIn('No childish wording',saved)
+        finally:term.close()
+
+    def test_bracketed_paste_supports_multiline_export(self):
+        term=Terminal(cols=64,rows=23,env_extra={'ZYN_SKIP_ONBOARDING':'0'},wait_ready=False)
+        try:
+            term.send(b'y\n',0.2)
+            content=b'## MEMORIES\n### Personal Context\n1. Session\n\n## PREFERENCES\n### Tone\n1. Simple\n'
+            term.send(b'\x1b[200~'+content+b'\x1b[201~\n\n',0.6)
+            self.assertIn('Profile saved for future sessions',term.text)
+            saved=(Path(term.tmp.name)/'chat'/'imported-memory.md').read_text()
+            self.assertIn('1. Simple',saved)
         finally:term.close()

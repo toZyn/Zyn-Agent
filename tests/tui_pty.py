@@ -105,13 +105,13 @@ class TuiIntegrationTests(unittest.TestCase):
     def test_first_run_memory_import_wizard_and_new_session_snapshot(self):
         term = Terminal(env_extra={'ZYN_SKIP_ONBOARDING': '0'}, wait_ready=False)
         try:
-            self.assertIn('Import your profile', term.text)
+            self.assertIn('Import memory from another app', term.text)
             term.send(b'y\n', 0.4)
-            self.assertIn('Here is the following prompt', term.text)
-            self.assertIn('Press C to copy', term.text)
-            self.assertNotIn('Only include memories and preferences from BEFORE', term.text)
-            term.send(b'p\n', 0.25)
-            doc = b'```markdown\n## MEMORIES\n### Personal Context\n1. Peru\n## PREFERENCES\n### Tone\n1. Clear\n```\n:save\n'
+            self.assertIn('Paste', term.text)
+            self.assertIn('Copy', term.text)
+            self.assertNotIn(':save', term.text)
+            term.send(b'c\n', 0.2)
+            doc = b'```markdown\n## MEMORIES\n### Personal Context\n1. Peru\n\n## PREFERENCES\n### Tone\n1. Clear\n```\n\n'
             term.send(doc, 0.8)
             self.assertIn('Profile saved for future sessions', term.text)
             self.assertIn('## MEMORIES', (Path(term.tmp.name) / 'chat' / 'imported-memory.md').read_text())

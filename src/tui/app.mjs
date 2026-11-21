@@ -5,6 +5,7 @@ import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
 import { selectViewportItems } from './viewport.mjs';
 import { confirmationViewport } from './confirmation-view.mjs';
 import { formatEventPreview } from './event-display.mjs';
+import { transcriptViewport } from './transcript-view.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
 import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor, mouseWheelSteps } from './input-events.mjs';
@@ -637,6 +638,24 @@ function ConfirmBar({ request, width, height }) {
   );
 }
 
+function TranscriptPanel({ view, width, height }) {
+  const page = transcriptViewport(view, width, height);
+  const paneHeight = Math.max(2, height - 4);
+  return h(Box, { flexDirection: 'column', height, paddingLeft: 2, paddingRight: 2 },
+    h(Text, { color: T.accent, bold: true }, uiText('Transcript · recent activity', 'Transcripción · actividad reciente')),
+    h(Text, { color: T.textGhost }, `${page.start + 1}-${page.end} / ${page.total}`),
+    h(Box, { flexDirection: 'column', height: paneHeight, overflowY: 'hidden' },
+      ...page.lines.map((line, index) => h(Text, {
+        key: String(page.start + index), color: T.textDim, wrap: 'truncate-end',
+      }, line || ' ')),
+    ),
+    h(Text, { color: T.accentDim, wrap: 'truncate-end' },
+      width < 52
+        ? uiText('↑↓ scroll · Esc close', '↑↓ mover · Esc cerrar')
+        : uiText('↑↓ scroll · PgUp/PgDn · Esc close · /export for full file', '↑↓ mover · RePág/AvPág · Esc cerrar · /export para archivo completo')),
+  );
+}
+
 function AuthCard({ width, flow }) {
   if (!flow) return null;
   const compact = width < 48;
@@ -1171,7 +1190,10 @@ export function App({ store, state, onSubmit }) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
     const onMouse = chunk => {
       const steps = mouseWheelSteps(chunk);
-      if (steps) store.scrollBy(steps * 3);
+      if (steps) {
+        if (store.transcriptView) store.scrollTranscript(steps * 3, width, height - 3);
+        else store.scrollBy(steps * 3);
+      }
     };
     process.stdin.on('data', onMouse);
     process.stdout.write('\x1b[?1000h\x1b[?1006h');
@@ -1179,7 +1201,7 @@ export function App({ store, state, onSubmit }) {
       process.stdin.off('data', onMouse);
       process.stdout.write('\x1b[?1000l\x1b[?1006l');
     };
-  }, [store]);
+  }, [store, width, height]);
 
   const modelKey   = state?.activeModel || DEFAULT_MODEL_KEY;
   const modelLabel = modelDisplayId(modelKey, MODELS[modelKey]);
@@ -1206,6 +1228,17 @@ export function App({ store, state, onSubmit }) {
         if (typeof saveState === 'function') saveState(state);
       } catch {}
       exit();
+      return;
+    }
+    if (store.transcriptView) {
+      if (key.escape || input === 'q') { store.closeTranscript(); return; }
+      const rows = Math.max(2, height - 7);
+      if (key.upArrow || input === 'k') store.scrollTranscript(1, width, height - 3);
+      else if (key.downArrow || input === 'j') store.scrollTranscript(-1, width, height - 3);
+      else if (key.pageUp) store.scrollTranscript(rows, width, height - 3);
+      else if (key.pageDown) store.scrollTranscript(-rows, width, height - 3);
+      else if (key.home) store.scrollTranscript(1000000, width, height - 3);
+      else if (key.end) store.scrollTranscript(-1000000, width, height - 3);
       return;
     }
     if (key.ctrl && input === 't') {
@@ -1356,6 +1389,13 @@ export function App({ store, state, onSubmit }) {
     else if (decision === 'n' || decision === '2' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
   });
 
+  if (store.transcriptView) {
+    return h(Box, { flexDirection: 'column', height: '100%', width: '100%' },
+      h(TranscriptPanel, { view: store.transcriptView, width, height: Math.max(7, height - 3) }),
+      h(StatusBar, { store, model: modelLabel, providerKey: MODELS[state.activeModel]?.provider || 'unknown', processing: false, width, turnCount: store.turnCount }),
+    );
+  }
+
   const showInput   = !store.confirmRequest && !store.selectRequest && !store.inputRequest && !store.authFlow;
   const showConfirm = !!store.confirmRequest;
   const showSelect  = !!store.selectRequest;
@@ -1425,7 +1465,7 @@ export function App({ store, state, onSubmit }) {
   const historyWindow = selectViewportItems(store.items, { columns: width, rows: historyRows - (store.scrollOffset > 0 ? 1 : 0), offset: store.scrollOffset });
 
   return h(Box, { flexDirection: 'column', width: '100%', height: '100%' },
-    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1, justifyContent: 'flex-end' },
+    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1, justifyContent: 'flex-start' },
       store.scrollOffset > 0
         ? h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `  ${uiText('Older messages', 'Mensajes anteriores')} · PgDn ${uiText('to return', 'para volver')}`)
         : null,
@@ -1697,6 +1737,12 @@ export async function startTUI(options = {}) {
   }
 
   const processInput = async (input) => {
+    if (input === '/transcript') {
+      const { readTranscriptEntries } = require('../utils/transcriptStorage');
+      const entries = await readTranscriptEntries(state.sessionId);
+      store.openTranscript(entries.slice(-50));
+      return;
+    }
     if (input === '/exit' || input === '/quit') {
       store.pendingExit = true;
       store.addEvent('info', uiText('bye', 'hasta luego'));

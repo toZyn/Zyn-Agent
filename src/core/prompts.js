@@ -122,11 +122,13 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       '',
       'RESPONDE ESTRICTA Y OBLIGATORIAMENTE CON: {"type":"final","content":"tu respuesta aqui"}',
       '',
-      'NO USES herramientas. NO hagas tool calls. NO investigues. Solo responde directamente.',
-      'El usuario quiere una respuesta rapida, no que ejecutes comandos ni busques en internet.',
+      'Si la consulta es solo informativa, responde directamente, excepto si el usuario pide expresamente usar una herramienta disponible.',
+      'Si el usuario solicita explícitamente una herramienta, utilízala cuando sea apropiada y proporcione los argumentos válidos.',
+      'Para preguntas con opciones cuando el usuario lo pide, usa ask_user en lugar de responder por él.',
       '',
-      'SOLO usa herramientas si el usuario EXPLICITAMENTE pide: crear/editar archivos, ejecutar',
-      'comandos, buscar en internet, instalar paquetes, etc.',
+      'Usa herramientas cuando sean necesarias para verificar información, ejecutar acciones autorizadas',
+      'o cuando el usuario pida expresamente una herramienta concreta.',
+      'No enumeres el catálogo de herramientas como respuesta a una petición de ejecutar una herramienta.',
       '',
       '# FORMATO DE RESPUESTA',
       '',
@@ -183,9 +185,7 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       '  |---------|---------|',
       '  | valor   | valor   |',
       '',
-      '  Usa emojis con moderacion solo para mejorar legibilidad:',
-      '  ⚠ importante / important, ✅ completado / done, ❌ error, ℹ nota / note, 📊 datos / data',
-      '  NO uses emojis en cada linea. Solo en titulos de seccion o puntos clave.',
+      '  Mantén un tono profesional, preciso y natural. Evita emojis y adornos innecesarios.',
       '',
       '  Las listas extensas se renderizan como scrollable. No limites el contenido.',
       '  Si el usuario pide "lista dinamica", usa el formato de secciones + bullet points.',
@@ -248,7 +248,7 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       'INFORMACION = responde directo (type="final"):',
       '  definiciones, conceptos, matematicas, saludos, opinion, explicaciones',
       '  "que es X" / "como funciona Y" / "hola" / "dime sobre Z" → INFORMACION',
-      '  REGLA ABSOLUTA: Si solo es informacion, NO uses herramientas. Responde directo.',
+      '  Si solo es información, responde directamente, salvo que el usuario pida una herramienta concreta.',
       '',
       'PREGUNTAR AL USUARIO = usa ask_user (type="tool"):',
       '  cuando necesites una decision, preferencia o input del usuario',
@@ -279,11 +279,13 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       '',
       'YOU MUST STRICTLY AND OBLIGATORILY RESPOND WITH: {"type":"final","content":"your answer here"}',
       '',
-      'DO NOT use tools. DO NOT make tool calls. DO NOT research. Just respond directly.',
-      'The user wants a quick answer, not for you to execute commands or search the internet.',
+      'For purely informational questions answer directly unless the user explicitly requests an available tool.',
+      'When the user explicitly requests a tool, use it when appropriate and supply valid arguments.',
+      'When the user explicitly asks for a multiple-choice question, use ask_user instead of answering it yourself.',
       '',
-      'Only use tools if the user EXPLICITLY asks to: create/edit files, run commands,',
-      'search the internet, install packages, etc.',
+      'Use tools when required to verify information, perform authorized actions,',
+      'or when the user explicitly requests a specific available tool.',
+      'Do not list the entire tool catalog as a substitute for a tool call.',
       '',
       '# RESPONSE FORMAT',
       '',
@@ -340,9 +342,7 @@ function buildSystemPrompt(cwd, state = {}, options = {}) {
       '  |--------|--------|',
       '  | value  | value  |',
       '',
-      '  Use emojis sparingly, only for readability:',
-      '  ⚠ important, ✅ done, ❌ error, ℹ note, 📊 data',
-      '  DO NOT use emojis on every line. Only section titles or key points.',
+      '  Keep responses professional, precise and natural. Avoid emojis and unnecessary decoration.',
       '',
       '  Long lists render as scrollable. Do not limit content.',
       '  If the user asks for "dynamic list", use sections + bullet points format.',
@@ -968,108 +968,10 @@ function buildToolErrorMessage(parsed, errorMessage, language = 'es') {
   ].join('\n');
 }
 
-function getCompactPrompt(language) {
-  const isEn = language === 'en';
-  return [
-    isEn
-      ? 'Your task is to create a detailed summary of the conversation so far, paying close attention to the user\'s explicit requests and your previous actions.'
-      : 'Tu tarea es crear un resumen detallado de la conversación hasta ahora, prestando mucha atención a las solicitudes explícitas del usuario y a tus acciones previas.',
-    '',
-    isEn
-      ? 'This summary must be exhaustive in capturing technical details, code patterns, and architectural decisions that would be essential to continue development work without losing context.'
-      : 'Este resumen debe ser exhaustivo al capturar detalles técnicos, patrones de código y decisiones arquitectónicas que serían esenciales para continuar el trabajo de desarrollo sin perder el contexto.',
-    '',
-    isEn
-      ? 'Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you have covered all necessary points. In your analysis process:'
-      : 'Antes de proporcionar tu resumen final, envuelve tu análisis en etiquetas <analysis> para organizar tus pensamientos y asegurarte de que has cubierto todos los puntos necesarios. En tu proceso de análisis:',
-    '',
-    '1. ' + (isEn
-      ? 'Analyze each message and section of the conversation chronologically. For each section, thoroughly identify:'
-      : 'Analiza cronológicamente cada mensaje y sección de la conversación. Para cada sección, identifica a fondo:'),
-    '   ' + (isEn
-      ? '- The user\'s explicit requests and intentions'
-      : '- Las solicitudes e intenciones explícitas del usuario'),
-    '   ' + (isEn
-      ? '- Your approach to addressing the user\'s requests'
-      : '- Tu enfoque para abordar las solicitudes del usuario'),
-    '   ' + (isEn
-      ? '- Key decisions, technical concepts, and code patterns'
-      : '- Decisiones clave, conceptos técnicos y patrones de código'),
-    '   ' + (isEn
-      ? '- Specific details like filenames, complete code snippets, function signatures, file edits, etc.'
-      : '- Detalles específicos como nombres de archivos, fragmentos de código completos, firmas de funciones, ediciones de archivos, etc.'),
-    '2. ' + (isEn
-      ? 'Double-check technical accuracy and completeness, thoroughly addressing each required element.'
-      : 'Verifica dos veces la precisión y la integridad técnica, abordando a fondo cada elemento requerido.'),
-    '',
-    isEn
-      ? 'Your summary MUST include the following sections:'
-      : 'Tu resumen DEBE incluir las siguientes secciones:',
-    '',
-    '1. ' + (isEn
-      ? 'Primary Request and Intention: Capture in detail all of the user\'s explicit requests and intentions.'
-      : 'Solicitud e Intención Primaria: Captura en detalle todas las solicitudes e intenciones explícitas del usuario'),
-    '2. ' + (isEn
-      ? 'Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.'
-      : 'Conceptos Técnicos Clave: Enumera todos los conceptos técnicos, tecnologías y marcos importantes discutidos.'),
-    '3. ' + (isEn
-      ? 'Files and Code Sections: List specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include complete code snippets when applicable. Include a summary of why this file read or edit is important.'
-      : 'Archivos y Secciones de Código: Enumera archivos específicos y secciones de código examinadas, modificadas o creadas. Presta especial atención a los mensajes más recientes e incluye fragmentos de código completos cuando sea aplicable e incluye un resumen de por qué esta lectura o edición de archivo es importante.'),
-    '4. ' + (isEn
-      ? 'Problem Resolution: Document resolved issues and any ongoing troubleshooting efforts.'
-      : 'Resolución de Problemas: Documenta los problemas resueltos y cualquier esfuerzo de solución de problemas en curso.'),
-    '5. ' + (isEn
-      ? 'Pending Tasks: Describe any pending tasks you have been explicitly asked to work on.'
-      : 'Tareas Pendientes: Describe cualquier tarea pendiente en la que se te haya pedido explícitamente que trabajes.'),
-    '6. ' + (isEn
-      ? 'Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both the user and assistant. Include filenames and code snippets when applicable.'
-      : 'Trabajo Actual: Describe en detalle precisamente en qué se estaba trabajando inmediatamente antes de esta solicitud de resumen, prestando especial atención a los mensajes más recientes tanto del usuario como del asistente. Incluye nombres de archivos y fragmentos de código cuando sea aplicable.'),
-    '7. ' + (isEn
-      ? 'Optional Next Step: List the next step you will take that is related to the most recent work you were doing. IMPORTANT: ensure this step is DIRECTLY aligned with the user\'s explicit requests and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly aligned with the user\'s request. Do not start tangential requests without first confirming with the user.'
-      : 'Próximo Paso Opcional: Enumera el próximo paso que tomarás que esté relacionado con el trabajo más reciente que estabas haciendo. IMPORTANTE: asegúrate de que este paso esté DIRECTAMENTE en línea con las solicitudes explícitas del usuario y la tarea en la que estabas trabajando inmediatamente antes de esta solicitud de resumen. Si tu última tarea fue concluida, entonces solo enumera los próximos pasos si están explícitamente en línea con la solicitud de los usuarios. No comiences con solicitudes tangenciales sin confirmar primero con el usuario.'),
-    '8. ' + (isEn
-      ? 'If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This must be verbatim to ensure no deviation in task interpretation.'
-      : 'Si hay un próximo paso, incluye citas directas de la conversación más reciente que muestren exactamente en qué tarea estabas trabajando y dónde te quedaste. Esto debe ser textual para asegurar que no haya desviaciones en la interpretación de la tarea.'),
-    '',
-    isEn
-      ? 'Output ONLY the <analysis> and <summary> sections. Use these exact tags:'
-      : 'Genera SOLO las secciones <analisis> y <resumen>. Usa estas etiquetas exactas:',
-    '',
-    isEn ? '<analysis>' : '<analisis>',
-    isEn
-      ? '[Your thought process, ensuring all points are thoroughly and accurately covered]'
-      : '[Tu proceso de pensamiento, asegurando que todos los puntos estén cubiertos a fondo y con precisión]',
-    isEn ? '</analysis>' : '</analisis>',
-    '',
-    isEn ? '<summary>' : '<resumen>',
-    '1. ' + (isEn ? 'Primary Request and Intention:' : 'Solicitud e Intención Primaria:'),
-    isEn ? '   [Detailed description]' : '   [Descripción detallada]',
-    '',
-    '2. ' + (isEn ? 'Key Technical Concepts:' : 'Conceptos Técnicos Clave:'),
-    '   - [Concept 1]',
-    '   - [Concept 2]',
-    '',
-    '3. ' + (isEn ? 'Files and Code Sections:' : 'Archivos y Secciones de Código:'),
-    '   - [Filename 1]',
-    '   ' + (isEn ? '  - [Summary of why this file is important]' : '  - [Resumen de por qué este archivo es importante]'),
-    '   ' + (isEn ? '  - [Summary of changes made, if any]' : '  - [Resumen de los cambios realizados, si los hay]'),
-    '   ' + (isEn ? '  - [Important Code Snippet]' : '  - [Fragmento de Código Importante]'),
-    '',
-    '4. ' + (isEn ? 'Problem Resolution:' : 'Resolución de Problemas:'),
-    isEn ? '   [Description of resolved issues and ongoing troubleshooting]' : '   [Descripción de los problemas resueltos y la solución de problemas en curso]',
-    '',
-    '5. ' + (isEn ? 'Pending Tasks:' : 'Tareas Pendientes:'),
-    '   - [Task 1]',
-    '   - [Task 2]',
-    '',
-    '6. ' + (isEn ? 'Current Work:' : 'Trabajo Actual:'),
-    isEn ? '   [Precise description of current work]' : '   [Descripción precisa del trabajo actual]',
-    '',
-    '7. ' + (isEn ? 'Optional Next Step:' : 'Próximo Paso Opcional:'),
-    isEn ? '   [Optional next step to take]' : '   [Próximo paso opcional a tomar]',
-    '',
-    isEn ? '</summary>' : '</resumen>',
-  ].join('\n');
+const COMPACTION_PROMPT = "Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.\nThis summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.\n\nBefore providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you've covered all necessary points. In your analysis process:\n\n1. Chronologically analyze each message and section of the conversation. For each section thoroughly identify:\n   - The user's explicit requests and intents\n   - Your approach to addressing the user's requests\n   - Key decisions, technical concepts and code patterns\n   - Specific details like file names, full code snippets, function signatures, file edits, etc\n2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.\n\nYour summary should include the following sections:\n\n1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail\n2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.\n3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.\n4. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.\n5. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.\n6. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.\n7. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests without confirming with the user first.\n8. If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.\n\nHere's an example of how your output should be structured:\n\n<example>\n<analysis>\n[Your thought process, ensuring all points are covered thoroughly and accurately]\n</analysis>\n\n<summary>\n1. Primary Request and Intent:\n   [Detailed description]\n\n2. Key Technical Concepts:\n   - [Concept 1]\n   - [Concept 2]\n   - [...]\n\n3. Files and Code Sections:\n   - [File Name 1]\n      - [Summary of why this file is important]\n      - [Summary of the changes made to this file, if any]\n      - [Important Code Snippet]\n   - [File Name 2]\n      - [Important Code Snippet]\n   - [...]\n\n4. Problem Solving:\n   [Description of solved problems and ongoing troubleshooting]\n\n5. Pending Tasks:\n   - [Task 1]\n   - [Task 2]\n   - [...]\n\n6. Current Work:\n   [Precise description of current work]\n\n7. Optional Next Step:\n   [Optional Next step to take]\n\n</summary>\n</example>\n\nPlease provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.";
+
+function getCompactPrompt() {
+  return COMPACTION_PROMPT;
 }
 
 module.exports = {
