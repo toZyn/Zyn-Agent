@@ -6,6 +6,7 @@ import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
 import { selectViewportItems } from './viewport.mjs';
 import { confirmationViewport } from './confirmation-view.mjs';
 import { formatEventPreview } from './event-display.mjs';
+import { formatTerminalTable } from './table-layout.mjs';
 import { transcriptViewport } from './transcript-view.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
@@ -209,12 +210,13 @@ function parseMarkdownBlocks(text) {
       continue;
     }
 
-    const tableCandidate = line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1]);
-    if (tableCandidate) {
+    const markdownTable = line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1]);
+    const unicodeTable = line.includes('│') && i + 1 < lines.length && lines[i + 1].includes('│');
+    if (markdownTable || unicodeTable) {
       flushParagraph();
       const table = [line];
-      i += 2;
-      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+      i += markdownTable ? 2 : 1;
+      while (i < lines.length && lines[i].trim() && (lines[i].includes('│') || lines[i].includes('|'))) {
         table.push(lines[i]);
         i += 1;
       }
@@ -348,15 +350,7 @@ function CodeBlock({ lang, code, width }) {
 }
 
 function MarkdownContent({ text, width, live }) {
-  const contentWidth = Math.max(24, (width || 80) - 8);
-  if (live) {
-    const lines = text.split('\n');
-    return h(Box, { flexDirection: 'column' },
-      ...lines.map((line, i) =>
-        h(Text, { key: String(i), color: T.text, wrap: 'wrap' }, line || ' '),
-      ),
-    );
-  }
+  const contentWidth = Math.max(12, (width || 80) - 8);
   const blocks = parseMarkdownBlocks(text);
   return h(Box, { flexDirection: 'column' },
     ...blocks.map((block, i) => {
@@ -401,25 +395,14 @@ function MarkdownContent({ text, width, live }) {
         case 'hr':
           return h(Text, { key: String(i), color: T.borderLight }, '─'.repeat(Math.max(10, Math.min(width || 80, 70))));
         case 'table': {
-          const rows = block.rows.map(row => splitTableCells(row)).filter((row, idx) => idx === 0 || !row.every(cell => /^:?-{3,}:?$/.test(cell)));
-          const widths = [];
-          for (const row of rows) {
-            row.forEach((cell, idx) => {
-              widths[idx] = Math.max(widths[idx] || 0, cell.length);
-            });
-          }
-          const maxTableWidth = Math.max(24, (width || 80) - 8);
-          const gaps = Math.max(0, widths.length - 1) * 3;
-          const total = widths.reduce((a, b) => a + b, 0) + gaps;
-          const scale = total > maxTableWidth ? Math.max(0.4, (maxTableWidth - gaps) / Math.max(1, widths.reduce((a, b) => a + b, 0))) : 1;
-          const fitted = widths.map(w => Math.max(6, Math.floor(w * scale)));
-          const lines = rows.map(row => row.map((cell, idx) => {
-            const cellWidth = fitted[idx] || 6;
-            const value = String(cell || '').slice(0, cellWidth);
-            return value.padEnd(cellWidth);
-          }).join(' │ '));
-          return h(Box, { key: String(i), flexDirection: 'column' },
-            ...lines.map((line, rowIdx) => h(Text, { key: String(rowIdx), color: rowIdx === 0 ? T.accent : T.textMuted, wrap: 'wrap' }, line)),
+          const rendered = formatTerminalTable(block.rows, contentWidth);
+          return h(Box, { key: String(i), flexDirection: 'column', paddingLeft: 0 },
+            ...rendered.lines.map((line, rowIdx) => h(Text, {
+              key: String(rowIdx),
+              color: rowIdx === 0 ? T.accent : T.textMuted,
+              bold: rowIdx === 0 && rendered.mode === 'columns',
+              wrap: 'wrap',
+            }, line)),
           );
         }
         default:
@@ -613,9 +596,9 @@ function SystemMsg({ text }) {
 }
 
 function QueuedMessage({ text }) {
-  return h(Box, { paddingLeft: 5, gap: 1, marginTop: 0 },
-    h(Text, { color: T.amber }, '\u{1F4E9}'),
-    h(Text, { color: T.textGhost, italic: true, wrap: 'wrap' }, text),
+  return h(Box, { paddingLeft: 4, marginTop: 1, marginBottom: 1, gap: 1 },
+    h(Text, { color: T.accent }, '↳'),
+    h(Text, { color: T.textGhost, italic: true, wrap: 'wrap' }, uiText('Queued', 'En espera') + ': ' + String(text || '').trim()),
   );
 }
 
