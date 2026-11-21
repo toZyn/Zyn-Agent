@@ -20,3 +20,5 @@ The tests run within a temporary data directory and do not alter normal user ses
 `npm run test:tui` also runs `tests/tui_flood_pty.py`. It renders 1,200 simulated alternating user and assistant messages, multiple streaming updates, and a separate 5,000-message case. It checks PageUp/PageDown and xterm SGR mouse-wheel scrolling, resizing, process responsiveness, and that Ink never emits a full-screen clear (`ESC[2J`) during the flood. The flood deliberately runs offline and does not incur model API charges.
 
 For manual extended stress, use `ZYN_FLOOD_MESSAGES=10000 node tests/tui_flood.mjs` in an interactive terminal. That fixture prints message count, elapsed time, retained viewport items, and RSS memory after completion. It is a UI benchmark rather than a provider/network benchmark. Large single-message rendering remains distinct from flooding the history with many messages.
+
+Ink disables interactive output by default under `CI` / `GITHUB_ACTIONS`, even with a TTY. The TUI explicitly enables Ink interactivity only when both standard input and output are TTYs. The PTY regression suite includes this environment to detect blank screens in CI.

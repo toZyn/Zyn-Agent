@@ -1994,6 +1994,7 @@ export async function startTUI(options = {}) {
 
   appInstance = render(h(App, { store, state, onSubmit: handleSubmit }), {
     exitOnCtrlC: false,
+    interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
   });
   const handleRawInput = chunk => {
     if (String(chunk) === '\x1b\x1b') {

@@ -5,7 +5,7 @@ import { UIStore } from '../src/tui/store.mjs';
 
 const store = new UIStore();
 const state = { language: 'en', settings: {}, activeModel: 'zyncloud-minimax-m3' };
-const app = render(React.createElement(App, { store, state, onSubmit: () => {} }), { exitOnCtrlC: false });
+const app = render(React.createElement(App, { store, state, onSubmit: () => {} }), { exitOnCtrlC: false, interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
 const iterations = Math.max(1200, Math.min(20000, Number(process.env.ZYN_FLOOD_MESSAGES) || 1200));
 const began = performance.now();
 for (let i = 0; i < iterations; i++) {

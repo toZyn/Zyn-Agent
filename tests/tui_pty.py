@@ -92,6 +92,15 @@ class TuiIntegrationTests(unittest.TestCase):
     def tearDown(self):
         self.term.close()
 
+    def test_github_actions_environment_with_real_tty(self):
+        term = Terminal(env_extra={'CI': 'true', 'GITHUB_ACTIONS': 'true'})
+        try:
+            self.assertIn('Type a message', term.text)
+            term.send(b'/exit\r', 0.4)
+            self.assertEqual(term.wait_exit(), 0)
+        finally:
+            term.close()
+
     def test_combined_exit_and_enter(self):
         self.term.send(b'/exit\r', 0.25)
         self.assertEqual(self.term.wait_exit(), 0)
