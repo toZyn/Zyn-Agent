@@ -2,8 +2,6 @@ name: Publish to npm (manual approval only)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -11,26 +9,17 @@ permissions:
 
 jobs:
   publish:
-    if: "github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'npm: publish v1.7.0 via existing workflow'"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v1.7.0
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm install --global 'npm@^11.5.1'
       - run: npm ci
       - run: npm run test:all
-      - name: Verify exact GitHub release
-        run: |
-          set -euo pipefail
-          test "$(node -p 'require("./package.json").version')" = '1.7.0'
-          test "$(git rev-parse HEAD)" = '4cd4a1713bbe4ad49f0ad13298c91113dfc9901b'
-      - name: Configure existing npm token only if present
+      - name: Configure npm token if configured
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -38,11 +27,13 @@ jobs:
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
             chmod 600 "$HOME/.npmrc"
           fi
-      - name: Publish zyn-ai v1.7.0
+      - name: Publish current package version
         run: |
           set -euo pipefail
-          if npm view zyn-ai@1.7.0 version --json >/dev/null 2>&1; then
-            echo 'Already published on npm.'
+          name="$(node -p 'require("./package.json").name')"
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "${name}@${version}" version --json >/dev/null 2>&1; then
+            echo "${name}@${version} is already on npm. No publication necessary."
           else
             npm publish --access public --provenance
           fi
