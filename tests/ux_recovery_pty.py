@@ -73,6 +73,7 @@ class RecoveryTests(unittest.TestCase):
             self.assertIn('Import',term.text)
             self.assertIn('Skip',term.text)
             term.send(b'n\n',0.35)
+            term.read(1.3)
             self.assertIn('new session',term.text)
             term.send(b'/exit\r',0.3)
             self.assertEqual(term.wait_exit(),0)

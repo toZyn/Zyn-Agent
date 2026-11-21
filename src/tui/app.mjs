@@ -1,4 +1,5 @@
 import { splitSystemOutput } from './output.mjs';
+import { readTerminalDimensions } from './dimensions.mjs';
 import { UIStore } from './store.mjs';
 import { getTheme, SPIN_FRAMES } from './themes.mjs';
 import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
@@ -66,14 +67,17 @@ function useStore(store) {
 
 function useDimensions() {
   const { stdout } = useStdout();
-  const [dims, setDims] = useState({ width: stdout?.columns || 100, height: stdout?.rows || 40 });
+  const [dims, setDims] = useState(() => readTerminalDimensions(stdout));
   useEffect(() => {
     if (!stdout) return;
-    const handler = () => {
-      setDims({ width: stdout.columns || 100, height: stdout.rows || 40 });
+    const refresh = () => {
+      const current = readTerminalDimensions(stdout);
+      setDims(previous => previous.width === current.width && previous.height === current.height ? previous : current);
     };
-    stdout.on('resize', handler);
-    return () => stdout.off('resize', handler);
+    stdout.on('resize', refresh);
+    const interval = setInterval(refresh, 750);
+    refresh();
+    return () => { stdout.off('resize', refresh); clearInterval(interval); };
   }, [stdout]);
   return dims;
 }

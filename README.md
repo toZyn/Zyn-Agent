@@ -159,3 +159,7 @@ Zyn can delegate a scoped task to a child agent with its own model conversation 
 Delegation tools: `spawn_agent`, `wait_agent`, `list_agents`, `followup_agent`, `interrupt_agent`, and `close_agent`. In the interactive terminal, `/agents` lists the current session's agents, and `/agents stop <id>` cancels one. Up to three simultaneous children per parent session are allowed by default. Closing the main TUI aborts running children.
 
 Subagent execution occurs in the same operating-system process and working tree, not a security-isolated container or automatically separated Git worktree. Use read-only roles for investigations or parallel reviews; avoid conflicting writable tasks, review each proposed change, and continue to require user approval for writes. Running several agents consumes provider requests and follows provider billing, rate limits, and context limits. This is a development feature; it has not been published to npm.
+
+### Android terminal resizing
+
+Zyn checks the terminal's reported dimensions when it receives a resize event and periodically while it runs. This helps when a mobile keyboard changes the terminal rows without delivering a standard resize event. Some embedded terminal clients keep reporting a stale height even after the keyboard opens; in those clients, `ZYN_TUI_ROWS=<rows> zyn` provides a manual height override. The operating system or terminal client must still report the correct viewport dimensions for fully automatic alignment.

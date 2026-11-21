@@ -2,7 +2,7 @@
 
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
-const { SESSIONS_DIR, TRANSCRIPTS_DIR } = require('../config');
+const { USER_DATA_ROOT, TRANSCRIPTS_DIR } = require('../config');
 
 const READ_TOOLS = Object.freeze([
   'list_dir', 'read_file', 'search_text', 'glob_files', 'file_info',
@@ -65,7 +65,7 @@ class SubagentCoordinator {
     const copy = value => JSON.parse(JSON.stringify(value));
     const child = {
       sessionId,
-      sessionPath: path.join(SESSIONS_DIR, sessionId + '.json'),
+      sessionPath: path.join(USER_DATA_ROOT, 'chat', 'subagents', sessionId + '.json'),
       transcriptPath: path.join(TRANSCRIPTS_DIR, sessionId + '.jsonl'),
       createdAt: now, updatedAt: now,
       title: 'Subagent: ' + role,
