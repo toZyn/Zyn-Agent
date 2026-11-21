@@ -3,6 +3,7 @@ import { UIStore } from './store.mjs';
 import { getTheme, SPIN_FRAMES } from './themes.mjs';
 import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
 import { selectViewportItems } from './viewport.mjs';
+import { confirmationViewport } from './confirmation-view.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
 import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor, mouseWheelSteps } from './input-events.mjs';
@@ -14,6 +15,7 @@ const require = createRequire(import.meta.url);
 const { runAgentTurn } = require('../core/agent');
 const { parseAgentResponse } = require('../core/prompts');
 const { getProviderBrand } = require('../providers/brand');
+const { modelDisplayId } = require('../providers/model-id');
 const { handleLocalCommand, SLASH_COMMANDS } = require('../cli/commands');
 const { countTokens, estimateContextTokens, getContextLimit } = require('../config');
 const {
@@ -422,29 +424,19 @@ function MarkdownContent({ text, width, live }) {
 }
 
 function Banner({ model, resumed, width, cwd }) {
-  const { frameWidth } = layoutForWidth(width);
-  const sessionLabel = resumed ? uiText('session resumed', 'sesión reanudada') : uiText('new session', 'sesión nueva');
-  if (frameWidth < 16) {
-    return h(Box, { paddingLeft: 1, flexDirection: 'column' },
-      h(Text, { color: T.accent, bold: true, wrap: 'truncate-end' }, `> ${APP_NAME}`),
-      h(Text, { color: T.textMuted, wrap: 'truncate-end' }, model),
-    );
-  }
-  const inner = frameWidth - 4;
-  const pad = value => String(value).slice(0, inner).padEnd(inner, ' ');
+  const columns = Math.max(14, width - 5);
   const location = String(cwd || '.');
-  const cwdShort = location.length > inner - 5
-    ? '...' + location.slice(-Math.max(0, inner - 8))
+  const cwdShort = location.length > columns - 10
+    ? '…' + location.slice(-Math.max(5, columns - 12))
     : location;
-  const top = '┌' + '─'.repeat(frameWidth - 2) + '┐';
-  const bottom = '└' + '─'.repeat(frameWidth - 2) + '┘';
-  const row = value => `│ ${pad(value)} │`;
-  return h(Box, { flexDirection: 'column', paddingTop: 1, paddingLeft: 1 },
-    h(Text, { color: T.border }, top),
-    h(Text, { color: T.accent, bold: true }, row('> ' + APP_NAME)),
-    h(Text, { color: T.textMuted }, row(uiText('model: ', 'modelo: ') + model + ' · ' + sessionLabel)),
-    h(Text, { color: T.textMuted }, row('cwd: ' + cwdShort)),
-    h(Text, { color: T.border }, bottom),
+  const sessionLabel = resumed ? uiText('resumed', 'reanudada') : uiText('new session', 'nueva sesión');
+  return h(Box, { flexDirection: 'column', paddingLeft: 2, paddingRight: 2 },
+    h(Box, { gap: 1 },
+      h(Text, { color: T.accent, bold: true }, '◇ Zyn'),
+      h(Text, { color: T.textGhost }, '·'),
+      h(Text, { color: T.textMuted }, sessionLabel),
+    ),
+    h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `${model}   ·   ${cwdShort}`),
   );
 }
 
@@ -615,39 +607,44 @@ function QueuedMessage({ text }) {
   );
 }
 
-function ConfirmBar({ title, detail, lastMessage, draft }) {
-  const detailLines = (detail || '').split('\n').filter(l => l.trim()).slice(0, 10);
-  return h(Box, { flexDirection: 'column', paddingLeft: 2, paddingRight: 2, marginTop: 1, borderStyle: 'round', borderColor: T.borderLight },
-    h(Box, { paddingLeft: 1, gap: 1 },
-      h(Text, { color: T.amber, bold: true }, '\u26a0'),
-      h(Text, { color: T.text, bold: true }, title),
+function ConfirmBar({ request, width, height }) {
+  const view = confirmationViewport(request, width, height, global.__zynCurrentLanguage || 'en');
+  const maxWidth = Math.max(10, width - 5);
+  return h(Box, {
+    flexDirection: 'column', paddingLeft: 1, paddingRight: 1,
+    marginTop: 0, borderStyle: 'round', borderColor: T.amber,
+  },
+    h(Box, { gap: 1 },
+      h(Text, { color: T.amber, bold: true }, '◆'),
+      h(Text, { color: T.text, bold: true, wrap: 'truncate-end' }, view.title.slice(0, maxWidth)),
     ),
-    detailLines.length > 0
-      ? h(Box, { flexDirection: 'column', paddingLeft: 2, marginTop: 0 },
-          ...detailLines.map((line, i) =>
-            h(Text, { key: String(i), color: T.textDim, wrap: 'wrap' }, line),
-          ),
-        )
-      : null,
-    lastMessage
-      ? h(Box, { marginTop: 0, paddingLeft: 2 },
-          h(Text, { color: T.textGhost }, uiText('Your message: ', 'Tu mensaje: ')),
-          h(Text, { color: T.textDim, wrap: 'wrap' }, shortTextPreview(lastMessage, 80)),
-        )
-      : null,
-    draft
-      ? h(Box, { marginTop: 0, paddingLeft: 2 },
-          h(Text, { color: T.textGhost }, uiText('Saved draft: ', 'Borrador guardado: ')),
-          h(Text, { color: T.textDim, wrap: 'wrap' }, shortTextPreview(draft, 80)),
-        )
-      : null,
-    h(Box, { marginTop: 0, paddingLeft: 2, gap: 2 },
-      h(Text, { color: T.green, bold: true }, '[y]'),
-      h(Text, { color: T.textMuted }, uiText('allow', 'permitir')),
-      h(Text, { color: T.textInvis }, '\u00b7'),
-      h(Text, { color: T.red, bold: true }, '[n]'),
-      h(Text, { color: T.textMuted }, uiText('deny', 'denegar')),
+    h(Box, { flexDirection: 'column', paddingLeft: 1 },
+      ...view.lines.map((line, i) =>
+        h(Text, { key: String(i), color: T.textDim, wrap: 'truncate-end' }, line),
+      ),
+      view.hidden > 0
+        ? h(Text, { color: T.textGhost }, uiText(`… ${view.hidden} lines hidden`, `… ${view.hidden} líneas ocultas`))
+        : null,
     ),
+    h(Text, { color: T.textMuted, wrap: 'truncate-end' }, view.footer),
+  );
+}
+
+function AuthCard({ width, flow }) {
+  if (!flow) return null;
+  const compact = width < 48;
+  return h(Box, {
+    flexDirection: 'column', paddingLeft: 1, paddingRight: 1,
+    borderStyle: 'round', borderColor: T.accent,
+  },
+    h(Box, { gap: 1 },
+      h(Text, { color: T.accent, bold: true }, '◇'),
+      h(Text, { color: T.text, bold: true }, uiText('Connect ChatGPT', 'Conectar ChatGPT')),
+    ),
+    h(Text, { color: T.textMuted, wrap: 'truncate-end' }, uiText('Complete authorization in your browser.', 'Autoriza el acceso desde el navegador.')),
+    h(Text, { color: T.textDim, wrap: 'truncate-end' }, compact
+      ? uiText('C copy · O open · Esc cancel', 'C copiar · O abrir · Esc cancelar')
+      : uiText('C copy URL · O open browser · L show URL · Esc cancel', 'C copiar URL · O abrir navegador · L ver URL · Esc cancelar')),
   );
 }
 
@@ -1176,7 +1173,7 @@ export function App({ store, state, onSubmit }) {
   }, [store]);
 
   const modelKey   = state?.activeModel || DEFAULT_MODEL_KEY;
-  const modelLabel = (MODELS[modelKey]?.label || modelKey).toLowerCase();
+  const modelLabel = modelDisplayId(modelKey, MODELS[modelKey]);
 
   const handleInput = useCallback((text, meta) => {
     if (text === '/exit' || text === '/quit') {
@@ -1194,6 +1191,7 @@ export function App({ store, state, onSubmit }) {
   useInput((input, key) => {
     if (/(?:\x1b)?\[<\d+;\d+;\d+[Mm]/.test(input)) return;
     if (key.ctrl && input === 'c') {
+      if (store.authFlow) { store.authFlow.cancel(); store.setAuthFlow(null); }
       try {
         const { saveState } = require('../utils/sessionStorage');
         if (typeof saveState === 'function') saveState(state);
@@ -1214,6 +1212,11 @@ export function App({ store, state, onSubmit }) {
       return;
     }
     if (key.escape) {
+      if (store.authFlow) {
+        store.authFlow.cancel();
+        store.setAuthFlow(null);
+        return;
+      }
       if (store.selectRequest) {
         store.cancelSelect();
         return;
@@ -1250,7 +1253,38 @@ export function App({ store, state, onSubmit }) {
       store.addEvent('info', uiText('press ESC again', 'pulsa ESC otra vez'), uiText('to exit', 'para salir'));
       return;
     }
+    if (store.authFlow) {
+      const keyValue = String(input || '').toLowerCase();
+      if (keyValue === 'c') {
+        const result = require('../core/clipboard').copyToClipboard(store.authFlow.url, { output: process.stdout });
+        store.addEvent(result.verified ? 'ok' : 'info',
+          result.verified ? uiText('Login link copied', 'Enlace de acceso copiado') : uiText('Copy requested', 'Copia solicitada'),
+          result.verified ? '' : uiText('Terminal clipboard support varies (OSC52).', 'El soporte del portapapeles depende del terminal (OSC52).'));
+        return;
+      }
+      if (keyValue === 'o') {
+        require('../auth/browser').openChatGPTAuthBrowser(store.authFlow.url);
+        store.addEvent('info', uiText('Opening browser', 'Abriendo navegador'), '');
+        return;
+      }
+      if (keyValue === 'l') {
+        store.addItem({ type: 'system', text: store.authFlow.url });
+        return;
+      }
+      return;
+    }
     if (store.selectRequest) {
+      const quickNumber = String(input || '').match(/^([1-9])(?:\r|\n)?$/);
+      if (quickNumber) {
+        const index = Number(quickNumber[1]) - 1;
+        const selection = store.selectRequest;
+        if (index < selection.items.length) {
+          const item = selection.items[index];
+          const value = selection.getValue ? selection.getValue(item, index) : item;
+          store.resolveSelect(value);
+          return;
+        }
+      }
       if (key.upArrow || input === '\x1b[A' || input === '\x1bOA' || input === '\x1b[[A') { store.adjustSelect(-1); return; }
       if (key.downArrow || input === '\x1b[B' || input === '\x1bOB' || input === '\x1b[[B') { store.adjustSelect(1); return; }
       if (key.return || input === '\r' || input === '\n') {
@@ -1305,14 +1339,19 @@ export function App({ store, state, onSubmit }) {
       if (key.ctrl && key.end) { store.scrollToBottom(); return; }
       return;
     }
-    if (input === 'y' || input === 's') store.resolveConfirm(true);
-    else if (input === 'n' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
+    if (input.toLowerCase() === 'v') { store.toggleConfirmDetails(); return; }
+    if (key.upArrow || input === '\x1b[A') { store.scrollConfirmDetails(-1); return; }
+    if (key.downArrow || input === '\x1b[B') { store.scrollConfirmDetails(1); return; }
+    const decision = String(input || '').trim().toLowerCase();
+    if (decision === 'y' || decision === 's' || decision === '1') store.resolveConfirm(true);
+    else if (decision === 'n' || decision === '2' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
   });
 
-  const showInput   = !store.confirmRequest && !store.selectRequest && !store.inputRequest;
+  const showInput   = !store.confirmRequest && !store.selectRequest && !store.inputRequest && !store.authFlow;
   const showConfirm = !!store.confirmRequest;
   const showSelect  = !!store.selectRequest;
   const showPrompt  = !!store.inputRequest;
+  const showAuth = !!store.authFlow;
 
   const streamingArea = [];
   const controlArea = [];
@@ -1338,9 +1377,13 @@ export function App({ store, state, onSubmit }) {
     }
   }
 
+  if (showAuth) {
+    controlArea.push(h(AuthCard, { key: 'auth', width, flow: store.authFlow }));
+  }
+
   if (showConfirm) {
     controlArea.push(
-      h(ConfirmBar, { key: 'confirm', title: store.confirmRequest.title, detail: store.confirmRequest.detail, lastMessage: store.lastUserMessage, draft: store.inputDraft })
+      h(ConfirmBar, { key: 'confirm', request: store.confirmRequest, width, height })
     );
   }
 
@@ -1367,13 +1410,13 @@ export function App({ store, state, onSubmit }) {
     : store.spinner ? 2 : 0;
   const modalRows = showSelect
     ? Math.max(7, Math.min(20, Math.floor(width / 5), height - 12) + 5)
-    : showPrompt ? 6 : showConfirm ? 5 : 0;
+    : showPrompt ? 6 : showConfirm ? Math.min(height - 4, store.confirmRequest?.expanded ? 12 : 8) : showAuth ? 5 : 0;
   const inputRows = showInput ? (store.inputDraft.startsWith('/') ? Math.min(10, Math.max(2, height - 5)) : 2) : modalRows;
   const historyRows = Math.max(1, height - inputRows - streamingRows - 4);
   const historyWindow = selectViewportItems(store.items, { columns: width, rows: historyRows - (store.scrollOffset > 0 ? 1 : 0), offset: store.scrollOffset });
 
   return h(Box, { flexDirection: 'column', width: '100%', height: '100%' },
-    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1 },
+    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1, justifyContent: 'flex-end' },
       store.scrollOffset > 0
         ? h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `  ${uiText('Older messages', 'Mensajes anteriores')} · PgDn ${uiText('to return', 'para volver')}`)
         : null,
@@ -1389,7 +1432,7 @@ export function App({ store, state, onSubmit }) {
       store,
       model: modelLabel,
       providerKey: MODELS[state.activeModel]?.provider || 'unknown',
-      processing: store.processing,
+      processing: store.processing && !showSelect && !showConfirm && !showPrompt && !showAuth,
       width,
       turnCount: store.turnCount,
     }),
@@ -1480,17 +1523,7 @@ export async function startTUI(options = {}) {
   process.on('exit', () => { mcpCleanup(); saveStateSafe(); });
 
   state.rl = null;
-  state.tuiConfirm = (title, detail) => store.requestSelect({
-    title,
-    subtitle: detail || '',
-    items: [
-      { key: true, label: uiText('Yes', 'Sí') },
-      { key: false, label: uiText('No', 'No') },
-    ],
-    initialIndex: 1,
-    getLabel: (item) => item.label,
-    getValue: (item) => item.key,
-  });
+  state.tuiConfirm = (title, detail) => store.requestConfirm(title, detail || '');
   state.tuiSelect = (options) => store.requestSelect(options);
   state.tuiInput = (options) => store.requestInput(options);
   state.tuiAskUser = (question, allItems, customLabel) => store.requestAskUser(question, allItems, customLabel);
@@ -1543,7 +1576,7 @@ export async function startTUI(options = {}) {
   };
 
   const modelKey   = state.activeModel || DEFAULT_MODEL_KEY;
-  const modelLabel = (MODELS[modelKey]?.label || modelKey).toLowerCase();
+  const modelLabel = modelDisplayId(modelKey, MODELS[modelKey]);
   const cwd = state.cwd || process.cwd();
 
   store.addItem({ type: 'banner', model: modelLabel, resumed, cwd });
@@ -1655,6 +1688,51 @@ export async function startTUI(options = {}) {
     if (input === '/exit' || input === '/quit') {
       store.pendingExit = true;
       store.addEvent('info', uiText('bye', 'hasta luego'));
+      return;
+    }
+
+    if (input === '/auth chatgpt login' || input === '/login chatgpt') {
+      if (store.authFlow) {
+        store.addEvent('info', uiText('Authorization already in progress', 'La autorización ya está en curso'));
+        return;
+      }
+      const { startChatGPTLogin, getChatGPTStatus } = require('../auth/chatgpt');
+      const { openChatGPTAuthBrowser } = require('../auth/browser');
+      const { refreshChatGPTCatalog } = require('../providers/chatgpt');
+      const { resolveAccountModelKey } = require('../providers/model-id');
+      try {
+        const previous = await getChatGPTStatus();
+        const flow = await startChatGPTLogin({ reconnect: previous.connected });
+        store.setAuthFlow(flow);
+        openChatGPTAuthBrowser(flow.url);
+        flow.done.then(async account => {
+          store.setAuthFlow(null);
+          if (!account.sharing) {
+            store.addEvent('warn', uiText('Connected without model authorization', 'Conectado sin autorización de modelos'));
+            return;
+          }
+          const models = await refreshChatGPTCatalog();
+          store.addEvent('ok', uiText('ChatGPT connected', 'ChatGPT conectado'), uiText(`${models.length} models available`, `${models.length} modelos disponibles`));
+          if (models.length) {
+            const selected = await store.requestSelect({
+              title: uiText('Choose ChatGPT model', 'Elegir modelo ChatGPT'),
+              items: models,
+              getLabel: model => `${model.slug}  ·  ${model.label}`,
+              getValue: model => model.slug,
+            });
+            if (selected) {
+              state.activeModel = resolveAccountModelKey(selected, MODELS);
+              await require('../utils/sessionStorage').saveState(state);
+              store.addEvent('ok', uiText('Active model', 'Modelo activo'), selected);
+            }
+          }
+        }).catch(error => {
+          store.setAuthFlow(null);
+          if (!/cancel/i.test(error.message || '')) store.addEvent('error', uiText('Authentication failed', 'Falló la autenticación'), error.message);
+        });
+      } catch (error) {
+        store.addEvent('error', uiText('Could not start authentication', 'No se pudo iniciar la autenticación'), error.message);
+      }
       return;
     }
 
@@ -1929,7 +2007,11 @@ export async function startTUI(options = {}) {
           const clean = lines.filter(l => l.trim()).join('\n');
           if (clean) for (const item of splitSystemOutput(clean)) store.addItem(item);
         }
-        if (!handled) store.addEvent('warn', uiText('command not recognized', 'comando no reconocido'), input);
+        if (!handled) {
+          const suggestion = require('../cli/command-suggest').suggestCommand(input.split(/\s+/)[0], SLASH_COMMANDS);
+          store.addEvent('warn', uiText('Unknown command', 'Comando desconocido'),
+            suggestion ? uiText(`Did you mean /${suggestion}?`, `¿Quisiste escribir /${suggestion}?`) : '/help');
+        }
       } catch (err) {
         store.addEvent('error', uiText('error', 'error'), err.message);
       } finally {

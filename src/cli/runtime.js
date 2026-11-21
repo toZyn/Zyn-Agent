@@ -465,7 +465,7 @@ async function main() {
     const { MODELS, listProvidersFromModels } = require('../config');
     for (const provider of listProvidersFromModels(MODELS)) {
       console.log(`${provider.key} (${provider.models.length} models)`);
-      for (const model of provider.models) console.log(`  ${model.key}: ${model.label}`);
+      for (const model of provider.models) console.log(`  ${require('../providers/model-id').modelDisplayId(model.key, MODELS[model.key])}: ${model.label}`);
     }
     return;
   }
@@ -497,11 +497,36 @@ async function main() {
       if (operation === 'login') {
         const previous = await getChatGPTStatus();
         const flow = await startChatGPTLogin({ reconnect: previous.connected });
-        console.log('Continue with ChatGPT. Opening your browser; use the link below if it does not open:');
-        console.log(flow.url);
+        console.log('\n◇ Connect ChatGPT');
+        console.log('  Complete authorization in your browser.');
         require('../auth/browser').openChatGPTAuthBrowser(flow.url);
-        console.log('The URL uses a local 127.0.0.1 callback. For remote servers, secure port forwarding is required.');
-        const connected = await flow.done;
+        console.log('  [C] Copy URL   [L] Show URL   [Q] Cancel');
+        console.log('  For SSH, use secure forwarding to the loopback callback.');
+        const readline = require('node:readline/promises');
+        const cli = process.stdin.isTTY ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
+        let finished = false;
+        const pollControls = async () => {
+          if (!cli) return;
+          try {
+            while (!finished) {
+              const answer = (await cli.question('  > ')).trim().toLowerCase();
+              if (finished) break;
+              if (answer === 'q' || answer === 'cancel') { flow.cancel(); break; }
+              if (answer === 'l') console.log(flow.url);
+              if (answer === 'c') {
+                const copy = require('../core/clipboard').copyToClipboard(flow.url);
+                console.log(copy.verified ? '  ✓ Login URL copied.' : '  Clipboard support unverified; press L to show the URL.');
+              }
+            }
+          } catch {}
+        };
+        if (cli) void pollControls();
+        let connected;
+        try { connected = await flow.done; }
+        catch (error) {
+          if (/cancel/i.test(error.message || '')) { console.log('Authorization cancelled.'); return; }
+          throw error;
+        } finally { finished = true; cli?.close(); }
         console.log(connected.sharing ? 'ChatGPT plan authorized for Zyn Agent.' : 'Signed in; ChatGPT plan usage was not authorized.');
         if (connected.sharing) {
           const models = await refreshChatGPTCatalog();
@@ -554,7 +579,16 @@ async function main() {
     const { getMemoryExportPrompt, saveImportedProfile, clearImportedProfile, markMemoryOnboarding } = require('../core/memory-transfer');
     const { forgetImportedMemoryEverywhere } = require('../utils/sessionStorage');
     const action = rawArgs[1];
-    if (action === 'prompt') { console.log(getMemoryExportPrompt()); return; }
+    if (action === 'prompt') {
+      const prompt = getMemoryExportPrompt();
+      if (rawArgs.includes('--show')) console.log(prompt);
+      else {
+        const result = require('../core/clipboard').copyToClipboard(prompt);
+        console.log(require('../core/memory-transfer').formatOnboardingPreview(prompt, process.stdout.columns || 62, 'en'));
+        console.log(result.verified ? 'Full prompt copied to clipboard.' : 'Clipboard not confirmed. Use zyn memory prompt --show for the complete prompt.');
+      }
+      return;
+    }
     if (action === 'import' && rawArgs[2]) {
       const fs = require('node:fs/promises');
       const content = await fs.readFile(rawArgs[2], 'utf8');

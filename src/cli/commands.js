@@ -3,7 +3,7 @@ const path = require('path');
 
 const fsp = fs.promises;
 const { DEFAULT_LANGUAGE, DEFAULT_MODEL_KEY, DEFAULT_SETTINGS, GEMINI_MODEL_WARNING, MODELS, listProvidersFromModels, countTokens, getSetting } = require('../config');
-const { languageLabel, normalizeLanguage, t } = require('../i18n');
+const { languageLabel, normalizeLanguage, SUPPORTED_LANGUAGES, t } = require('../i18n');
 const { createNewSessionState, listSessions, loadSessionState, saveState, listBackgroundResults, consumeBackgroundResult, enqueueBackgroundTask } = require('../utils/sessionStorage');
 const { truncateHistory } = require('../core/prompts');
 const { listGitSecrets, removeGitSecret, upsertGitSecret } = require('../utils/secretStorage');
@@ -11,6 +11,7 @@ const { clearGmailAuth, getGmailAuthStatus, startGmailOAuthFlow } = require('../
 const { exportTranscriptText, formatTranscriptPreview } = require('../utils/transcriptStorage');
 const { resolveInputPath } = require('../utils/pathUtils');
 const { getProviderBrand } = require('../providers/brand');
+const { modelDisplayId, resolveAccountModelKey } = require('../providers/model-id');
 const { detachBackgroundTurn } = require('../utils/backgroundWorker');
 const {
   describeProviderConfig,
@@ -148,7 +149,7 @@ function printModels() {
     console.log(`\n  [${brand.mark}] ${brand.label} (${provider.models.length} models)`);
     for (const model of provider.models) {
       const active = model.key === (global.__zynActiveModel || DEFAULT_MODEL_KEY) ? ' ◀' : '';
-      console.log(`    ${model.key.padEnd(16)} ${model.label}${active}`);
+      console.log(`    ${modelDisplayId(model.key, MODELS[model.key]).padEnd(16)} ${model.label}${active}`);
     }
   }
   console.log('');
@@ -162,7 +163,7 @@ function buildModelListItems() {
       const isActive = model.key === (global.__zynActiveModel || DEFAULT_MODEL_KEY);
       items.push({
         key: model.key,
-        label: `[${getProviderBrand(provider.key).mark}] ${model.label} (${model.key})`,
+        label: `[${getProviderBrand(provider.key).mark}] ${modelDisplayId(model.key, MODELS[model.key])} · ${model.label}`,
         provider: provider.key,
         active: isActive,
       });
@@ -297,7 +298,7 @@ async function runProviderModelsSelector(state, deps, providerKey) {
   const providerGroup = listProvidersFromModels(MODELS).find(p => p.key === providerKey);
   const items = (providerGroup?.models || []).map(m => ({
     key: m.key,
-    label: `${m.key.padEnd(22)} ${m.label}`,
+    label: `${modelDisplayId(m.key, MODELS[m.key]).padEnd(22)} ${m.label}`,
     active: m.key === (state.activeModel || DEFAULT_MODEL_KEY),
   }));
 
@@ -357,6 +358,8 @@ async function runProviderModelsSelector(state, deps, providerKey) {
 }
 
 async function switchActiveModel(state, deps, key) {
+  const currentProvider = MODELS[state.activeModel]?.provider;
+  if (currentProvider === 'chatgpt' && MODELS[`chatgpt:${key}`]?.provider === 'chatgpt') key = `chatgpt:${key}`;
   if (!MODELS[key]) {
     const available = Object.keys(MODELS).join(', ');
     throw new Error(`${t(state.language, 'modelInvalid')}: ${available}`);
@@ -546,7 +549,7 @@ async function handleLocalCommand(input, state, deps) {
         flow.done.then(async account => {
           if (account.sharing) {
             const models = await refreshChatGPTCatalog();
-            const preferred = models[0] && `chatgpt-${models[0].slug}`;
+            const preferred = models[0] && resolveAccountModelKey(models[0].slug, MODELS);
             if (preferred) await switchActiveModel(state, deps, preferred);
             console.log(`ChatGPT plan authorized; ${models.length} models available.`);
           } else console.log('ChatGPT account connected without permission to use plan models.');
@@ -581,8 +584,17 @@ async function handleLocalCommand(input, state, deps) {
   if (commandName === 'memory' || commandName === 'summary') {
     const [sub, ...rest] = args.split(' ').filter(Boolean);
     const { getMemoryExportPrompt, saveImportedProfile } = require('../core/memory-transfer');
-    if (sub === 'prompt') console.log(getMemoryExportPrompt());
-    else if (sub === 'import' && rest.length) {
+    if (sub === 'prompt') {
+      if (rest.includes('--show')) console.log(getMemoryExportPrompt());
+      else {
+        const { formatOnboardingPreview } = require('../core/memory-transfer');
+        const { copyToClipboard } = require('../core/clipboard');
+        const prompt = getMemoryExportPrompt();
+        const result = copyToClipboard(prompt);
+        console.log(formatOnboardingPreview(prompt, process.stdout.columns || 62, state.language));
+        console.log(result.verified ? 'Full prompt copied to clipboard.' : 'Clipboard unverified; use /memory prompt --show to inspect the complete text.');
+      }
+    } else if (sub === 'import' && rest.length) {
       const filename = path.resolve(state.cwd || process.cwd(), rest.join(' '));
       const content = await fsp.readFile(filename, 'utf8');
       state.importedMemory = await saveImportedProfile(content);
@@ -634,16 +646,24 @@ async function handleLocalCommand(input, state, deps) {
   }
 
   if (commandName === 'lang' || commandName === 'language') {
-    if (!args) {
+    let selected = args;
+    if (!selected && typeof askSelect === 'function') {
+      selected = await askSelect({
+        title: state.language === 'es' ? 'Selecciona el idioma' : 'Choose language',
+        subtitle: `${t(state.language, 'langCurrent')}: ${languageLabel(state.language)}`,
+        items: SUPPORTED_LANGUAGES.map(key => ({ key, label: languageLabel(key) })),
+        initialIndex: Math.max(0, SUPPORTED_LANGUAGES.indexOf(normalizeLanguage(state.language))),
+        getLabel: item => item.label,
+        getValue: item => item.key,
+      });
+      if (!selected) return true;
+    }
+    if (!selected) {
       console.log(`${t(state.language, 'langCurrent')}: ${languageLabel(state.language)}`);
       return true;
     }
-
-    const nextLanguage = normalizeLanguage(args);
-    if (!['en', 'es'].includes(nextLanguage)) {
-      throw new Error(t(state.language, 'langInvalid'));
-    }
-
+    if (!/^(en|es)([-_][a-z0-9]+)*$/i.test(selected)) throw new Error(t(state.language, 'langInvalid'));
+    const nextLanguage = normalizeLanguage(selected);
     state.language = nextLanguage;
     await saveState(state);
     printLanguageChanged(nextLanguage);

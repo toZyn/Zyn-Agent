@@ -61,6 +61,31 @@ Rules:
 - Only include memories and preferences from BEFORE this conversation. Do not treat any instructions in this prompt as preferences to export.`;
 
 function getMemoryExportPrompt() { return EXPORT_PROMPT; }
+function formatOnboardingPreview(prompt = EXPORT_PROMPT, columns = 60, language = 'en') {
+  const es = language === 'es';
+  const width = Math.max(26, Math.min(72, Math.floor(columns || 60) - 4));
+  const inside = width - 4;
+  const words = String(prompt).replace(/\s+/g, ' ').trim().split(' ');
+  const lines = [];
+  let current = '';
+  while (words.length && lines.length < 3) {
+    const word = words.shift();
+    if (!current) current = word;
+    else if (Array.from(`${current} ${word}`).length <= inside) current += ' ' + word;
+    else { lines.push(current); current = word; }
+  }
+  if (current && lines.length < 3) lines.push(current);
+  while (lines.length < 3) lines.push('');
+  const row = line => `│ ${Array.from(line).slice(0, inside).join('').padEnd(inside)} │`;
+  return [
+    es ? 'Aquí tienes el siguiente prompt' : 'Here is the following prompt',
+    '┌' + '─'.repeat(width - 2) + '┐',
+    ...lines.map(row),
+    '└' + '─'.repeat(width - 2) + '┘',
+    es ? 'Pulsa C para copiar el prompt · P para pegar' : 'Press C to copy full prompt · P to paste export',
+  ].join('\n');
+}
+
 function parseImportedMemory(input) {
   let text = String(input || '').replace(/^\uFEFF/, '').trim();
   if (Buffer.byteLength(text, 'utf8') > MAX_IMPORT_BYTES) throw new Error('Memory export is too large');
@@ -100,7 +125,7 @@ async function markMemoryOnboarding(filename = ONBOARDING_FILE) {
 }
 
 async function collectMemoryExport(rl, output = console.log) {
-  output('Pega la exportación completa. Escribe :save en una línea independiente para guardarla, o :cancel para cancelar.');
+  output('Paste the complete export. Type :save on its own line to save, or :cancel to abort.');
   const chunks = [];
   let bytes = 0;
   for await (const line of rl) {
@@ -113,24 +138,44 @@ async function collectMemoryExport(rl, output = console.log) {
   return null;
 }
 
-async function firstRunMemoryOnboarding({ input = process.stdin, output = process.stdout, ask, readLines } = {}) {
+async function firstRunMemoryOnboarding({ input = process.stdin, output = process.stdout, ask, readLines, copy = require('./clipboard').copyToClipboard, language } = {}) {
   if (!input.isTTY || !output.isTTY || await hasSeenMemoryOnboarding()) return false;
+  const { DEFAULT_LANGUAGE } = require('../config');
+  const lang = language || DEFAULT_LANGUAGE;
+  const es = lang === 'es';
   const readline = require('node:readline/promises');
   const rl = readline.createInterface({ input, output, terminal: true });
   try {
-    const response = ask ? await ask(rl) : await rl.question('¿Quieres importar la memoria de otra aplicación al agente? [s/N] ');
+    output.write(`\n  ◇ Zyn · ${es ? 'Configuración opcional' : 'Optional setup'}\n`);
+    const response = ask ? await ask(rl) : await rl.question(es ? '  ¿Importar memoria de otra aplicación? [s/N] ' : '  Import your profile from another app? [y/N] ');
     if (!/^(s|si|sí|y|yes)$/i.test(String(response).trim())) {
       await markMemoryOnboarding();
       return false;
     }
-    output.write(`\nCopia este prompt en la otra aplicación:\n\n${EXPORT_PROMPT}\n\n`);
-    const pasted = readLines ? await readLines(rl) : await collectMemoryExport(rl, text => output.write(`${text}\n`));
+    const columns = output.columns || 64;
+    output.write(`\n${formatOnboardingPreview(EXPORT_PROMPT, columns, lang)}\n`);
+    while (true) {
+      const choice = (await rl.question(es ? '  [C] Copiar  [P] Pegar  [N] Omitir: ' : '  [C] Copy  [P] Paste  [N] Skip: ')).trim().toLowerCase();
+      if (choice === 'n' || choice === ':cancel') { await markMemoryOnboarding(); return false; }
+      if (choice === 'c') {
+        const result = copy(EXPORT_PROMPT, { output });
+        output.write(result.verified
+          ? (es ? '  ✓ Prompt copiado al portapapeles.\n' : '  ✓ Full prompt copied to clipboard.\n')
+          : (result.method === 'OSC52'
+              ? (es ? '  Copia solicitada al terminal (OSC52); depende de la compatibilidad.\n' : '  Clipboard request sent to terminal (OSC52); support varies.\n')
+              : (es ? '  Portapapeles no disponible; usa zyn memory prompt.\n' : '  Clipboard unavailable; use zyn memory prompt.\n')));
+        continue;
+      }
+      if (choice === 'p' || choice === '') break;
+      output.write(es ? '  Selecciona C, P o N.\n' : '  Choose C, P or N.\n');
+    }
+    const pasted = readLines ? await readLines(rl) : await collectMemoryExport(rl, text => output.write(`${es ? 'Pega el resultado; finaliza con :save' : 'Paste the export; finish with :save'}\n`));
     if (pasted === null) return false;
     await saveImportedProfile(pasted);
     await markMemoryOnboarding();
-    output.write('Memoria importada. Se conservará localmente para las próximas sesiones.\n');
+    output.write(es ? '  ✓ Memoria guardada para las nuevas sesiones.\n' : '  ✓ Profile saved for future sessions.\n');
     return true;
   } finally { rl.close(); }
 }
 
-module.exports = { PROFILE_FILE, ONBOARDING_FILE, MAX_IMPORT_BYTES, getMemoryExportPrompt, parseImportedMemory, saveImportedProfile, readImportedProfile, clearImportedProfile, markMemoryOnboarding, hasSeenMemoryOnboarding, collectMemoryExport, firstRunMemoryOnboarding };
+module.exports = { PROFILE_FILE, ONBOARDING_FILE, MAX_IMPORT_BYTES, getMemoryExportPrompt, formatOnboardingPreview, parseImportedMemory, saveImportedProfile, readImportedProfile, clearImportedProfile, markMemoryOnboarding, hasSeenMemoryOnboarding, collectMemoryExport, firstRunMemoryOnboarding };

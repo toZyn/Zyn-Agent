@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { MODELS, USER_DATA_ROOT } = require('../../config');
 const { getChatGPTAccessToken } = require('../../auth/chatgpt');
+const { resolveAccountModelKey } = require('../model-id');
 const BASE_URL = 'https://api.openai.com/v1';
 
 async function fetchAvailableChatGPTModels(options = {}) {
@@ -18,10 +19,17 @@ async function fetchAvailableChatGPTModels(options = {}) {
 
 async function refreshChatGPTCatalog(options = {}) {
   const models = await fetchAvailableChatGPTModels(options);
-  for (const key of Object.keys(MODELS)) if (key.startsWith('chatgpt-') && key !== 'chatgpt-account') delete MODELS[key];
+  for (const key of Reflect.ownKeys(MODELS)) {
+    if (typeof key === 'string' && MODELS[key]?.provider === 'chatgpt' && key !== 'chatgpt-account') delete MODELS[key];
+  }
   for (const model of models) {
-    const key = `chatgpt-${model.slug}`;
-    MODELS[key] = { label: `${model.label} (ChatGPT plan)`, provider: 'chatgpt', modelId: model.slug, contextLength: 128000 };
+    const key = resolveAccountModelKey(model.slug, MODELS);
+    const descriptor = { label: model.label, provider: 'chatgpt', modelId: model.slug, contextLength: 128000 };
+    MODELS[key] = descriptor;
+    const legacy = `chatgpt-${model.slug}`;
+    if (!Object.prototype.hasOwnProperty.call(MODELS, legacy)) {
+      Object.defineProperty(MODELS, legacy, { value: descriptor, enumerable: false, configurable: true });
+    }
   }
   const folder = path.resolve(options.directory || path.join(USER_DATA_ROOT, 'chatgpt'));
   await fs.mkdir(folder, { recursive: true, mode: 0o700 });

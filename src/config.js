@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { normalizeLanguage } = require('./i18n');
+const { resolveAccountModelKey } = require('./providers/model-id');
 
 const APP_NAME = 'Zyn';
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -595,13 +596,13 @@ function loadExternalModels() {
   );
 }
 
-function loadChatGPTModelCache() {
+function loadChatGPTModelCache(registered = {}) {
   const saved = readJsonFile(path.join(USER_DATA_ROOT, 'chatgpt', 'models.json'));
   if (!Array.isArray(saved?.models)) return {};
   const collected = {};
   for (const model of saved.models) {
     if (!/^[a-zA-Z0-9._:-]{1,100}$/.test(model?.slug || '')) continue;
-    collected[`chatgpt-${model.slug}`] = {
+    collected[resolveAccountModelKey(model.slug, { ...registered, ...collected })] = {
       label: `${String(model.label || model.slug).slice(0,120)} (ChatGPT plan)`,
       provider: 'chatgpt', modelId: model.slug, contextLength: 128000,
     };
@@ -609,14 +610,18 @@ function loadChatGPTModelCache() {
   return collected;
 }
 
-const MODELS = {
-  ...BUILTIN_MODELS,
-  ...loadExternalModels(),
-  ...loadChatGPTModelCache(),
-};
+const BASE_MODELS = { ...BUILTIN_MODELS, ...loadExternalModels() };
+const MODELS = { ...BASE_MODELS, ...loadChatGPTModelCache(BASE_MODELS) };
+for (const [key, model] of Object.entries(MODELS)) {
+  if (model.provider !== 'chatgpt' || !model.modelId) continue;
+  const legacy = `chatgpt-${model.modelId}`;
+  if (!Object.prototype.hasOwnProperty.call(MODELS, legacy)) {
+    Object.defineProperty(MODELS, legacy, { value: model, enumerable: false, configurable: true });
+  }
+}
 
 const DEFAULT_MODEL_KEY = process.env.ZYN_DEFAULT_MODEL || 'zyncloud-minimax-m3';
-const DEFAULT_LANGUAGE = normalizeLanguage(process.env.ZYN_DEFAULT_LANG || process.env.ZYN_LANGUAGE || process.env.LANG || 'en');
+const DEFAULT_LANGUAGE = normalizeLanguage(process.env.ZYN_DEFAULT_LANG || process.env.ZYN_LANGUAGE || 'en');
 
 const HUGGINGFACE_TOKEN = process.env.ZYN_HUGGINGFACE_TOKEN || process.env.HF_TOKEN || '';
 const GEMINI_API_KEY = process.env.ZYN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';

@@ -726,14 +726,14 @@ async function runCommandTool(args, state, paint, ctx) {
 
   const allowed = await askConfirmation(
     state.rl,
-    'Ejecutar comando',
-    `${command}\n\nDirectorio: ${state.cwd}`,
+    t(state?.language, 'Ejecutar comando', 'Run command'),
+    `${t(state?.language, 'Comando', 'Command')}: ${command}\n${t(state?.language, 'Directorio', 'Directory')}: ${state.cwd}`,
     paint,
     state,
   );
 
   if (!allowed) {
-    return 'Comando cancelado por el usuario.';
+    return t(state?.language, 'Comando cancelado por el usuario.', 'Command denied by user.');
   }
 
 
@@ -745,10 +745,10 @@ async function runCommandTool(args, state, paint, ctx) {
     signal: ctx?.signal,
   });
 
-  const parts = [`Exit code: ${result.code ?? 'desconocido'}`];
+  const parts = [`Exit code: ${result.code ?? t(state?.language, 'desconocido', 'unknown')}`];
 
   if (result.timedOut) {
-    parts.push('Timeout: el comando fue detenido por tiempo.');
+    parts.push(t(state?.language, 'Tiempo agotado: se detuvo el comando.', 'Timeout: command terminated after exceeding its time limit.'));
   }
 
   if (result.stdout.trim()) {

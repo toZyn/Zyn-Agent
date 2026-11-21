@@ -19,6 +19,7 @@ export class UIStore extends EventEmitter {
     this.spinner = null;
     this.processing = false;
     this.confirmRequest = null;
+    this.authFlow = null;
     this.selectRequest = null;
     this.inputRequest = null;
     this.lastUserMessage = '';
@@ -190,11 +191,29 @@ export class UIStore extends EventEmitter {
     this._emit();
   }
 
+  setAuthFlow(flow) {
+    this.authFlow = flow;
+    this._emit();
+  }
+
   requestConfirm(title, detail) {
     return new Promise(resolve => {
-      this.confirmRequest = { title, detail, resolve };
+      this.confirmRequest = { title, detail, resolve, expanded: false, offset: 0 };
       this._emit();
     });
+  }
+
+  toggleConfirmDetails() {
+    if (!this.confirmRequest) return;
+    this.confirmRequest.expanded = !this.confirmRequest.expanded;
+    this.confirmRequest.offset = 0;
+    this._emit();
+  }
+
+  scrollConfirmDetails(delta) {
+    if (!this.confirmRequest || !this.confirmRequest.expanded) return;
+    this.confirmRequest.offset = Math.max(0, (this.confirmRequest.offset || 0) + delta);
+    this._emit();
   }
 
   resolveConfirm(answer) {
