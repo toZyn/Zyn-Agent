@@ -149,7 +149,7 @@ class SubagentCoordinator {
       try {
         await Promise.race([
           agent.promise,
-          new Promise(resolve => { timer = setTimeout(resolve, timeout); timer.unref?.(); }),
+          new Promise(resolve => { timer = setTimeout(resolve, timeout);  }),
         ]);
       } finally { if (timer) clearTimeout(timer); }
     }

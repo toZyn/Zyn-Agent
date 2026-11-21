@@ -62,6 +62,7 @@ Most commands run within both the Ink TUI and the classic interactive terminal. 
 | `/auto` | auto-approval |
 | `/stop` | stop agent |
 | `/compact` | compact memory |
+| `/agents` | list and manage subagents |
 
 ## Skills and integrations
 

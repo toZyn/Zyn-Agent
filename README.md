@@ -150,3 +150,12 @@ The TUI integration tests use Python 3 with a POSIX pseudo-terminal. They cover 
 See [Architecture](docs/ARCHITECTURE.md), [TUI testing](docs/TUI_TESTING.md), and [Capabilities and limitations](docs/AGENT_CAPABILITIES.md). Issues: [GitHub Issues](https://github.com/toZyn/Zyn-Agent/issues).
 
 MIT license. See [LICENSE](LICENSE).
+
+
+## Subagents (development branch)
+
+Zyn can delegate a scoped task to a child agent with its own model conversation and session transcript. Agents inherit the configured provider and working directory but never inherit automatic approval. Read-only roles are `explore`, `review`, and `plan`. The `general` role can propose modifications, but the parent's normal interactive permission approval is still required. By default, child context is isolated; use `fork: "all"` only when the extra parent context is needed. Subagents cannot spawn further agents.
+
+Delegation tools: `spawn_agent`, `wait_agent`, `list_agents`, `followup_agent`, `interrupt_agent`, and `close_agent`. In the interactive terminal, `/agents` lists the current session's agents, and `/agents stop <id>` cancels one. Up to three simultaneous children per parent session are allowed by default. Closing the main TUI aborts running children.
+
+Subagent execution occurs in the same operating-system process and working tree, not a security-isolated container or automatically separated Git worktree. Use read-only roles for investigations or parallel reviews; avoid conflicting writable tasks, review each proposed change, and continue to require user approval for writes. Running several agents consumes provider requests and follows provider billing, rate limits, and context limits. This is a development feature; it has not been published to npm.
