@@ -1,7 +1,13 @@
+import { UIStore } from './store.mjs';
+import { getTheme, SPIN_FRAMES } from './themes.mjs';
+import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
+import { appendVisibleItem } from './viewport.mjs';
+import { layoutForWidth } from './layout.mjs';
+import { runSerialInputs } from './turn-runner.mjs';
+import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor } from './input-events.mjs';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { render, Box, Text, useInput, useApp, useStdout } from 'ink';
 import { createRequire } from 'module';
-import { EventEmitter } from 'events';
 
 const require = createRequire(import.meta.url);
 const { runAgentTurn } = require('../core/agent');
@@ -31,285 +37,7 @@ function uiText(en, es) {
   return getTuiLang() === 'es' ? es : en;
 }
 const SPIN_MS = 80;
-const THINKING_THROTTLE_MS = 200;
 
-const SPIN_FRAMES = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
-const SPIN_FRAMES_DOTS = ['\u25cb', '\u25cf', '\u25d0', '\u25d1', '\u25d2', '\u25d3'];
-const SPIN_FRAMES_BRAILLE = ['\u2801', '\u2803', '\u2807', '\u280f', '\u281f', '\u283f', '\u287f', '\u28ff'];
-const SPIN_FRAMES_ARROW = ['\u2190', '\u2196', '\u2191', '\u2197', '\u2192', '\u2198', '\u2193', '\u2199'];
-const SPIN_FRAMES_MOON = ['\u25d6', '\u25d7', '\u25d8', '\u25d9'];
-const SPIN_FRAMES_CLOCK = ['\u2570', '\u256f', '\u256e', '\u256d', '\u256c', '\u256b', '\u256a', '\u2569', '\u2568', '\u2567', '\u2566', '\u2565', '\u2564', '\u2563', '\u2562', '\u2561'];
-
-const THEMES = {
-  dark: {
-    bg: '#212823', surface: '#1a1a1a', surfaceHi: '#222222',
-    text: '#ffffff', textDim: '#cccccc', textMuted: '#999999',
-    textGhost: '#888888', textInvis: '#555555',
-    accent: '#d4a054', accentSoft: '#c49450', accentDim: '#8a6a3a',
-    green: '#6aab6a', greenDim: '#3a6a3a', red: '#cc5555', redDim: '#6a3333',
-    amber: '#ccaa44', amberDim: '#6a5522', purple: '#aa88cc', purpleDim: '#5a446a',
-    blue: '#6699cc', blueDim: '#334466', cyan: '#66cccc', cyanDim: '#336666',
-    border: '#2a2a2a', borderLight: '#383838', codeBg: '#111111',
-    spinFrames: SPIN_FRAMES, spinMs: 80, borderStyle: 'line',
-  },
-  cappuccino: {
-    bg: '#f5efe6', surface: '#f0e6d6', surfaceHi: '#e8dcc8',
-    text: '#3b2f2f', textDim: '#5a4a4a', textMuted: '#7a6a6a',
-    textGhost: '#b0a090', textInvis: '#d0c0b0',
-    accent: '#a0522d', accentSoft: '#b0623d', accentDim: '#c0724d',
-    green: '#2e8b57', greenDim: '#5cb85c', red: '#c0392b', redDim: '#e74c3c',
-    amber: '#d4a017', amberDim: '#f0c040', purple: '#8e44ad', purpleDim: '#a855c0',
-    blue: '#2980b9', blueDim: '#5dade2', cyan: '#17a2b8', cyanDim: '#5bc0de',
-    border: '#c8b89a', borderLight: '#d8c8aa', codeBg: '#e8dcc8',
-    spinFrames: SPIN_FRAMES_DOTS, spinMs: 120, borderStyle: 'round',
-  },
-  light: {
-    bg: '#ffffff', surface: '#f8f9fa', surfaceHi: '#e9ecef',
-    text: '#212529', textDim: '#495057', textMuted: '#6c757d',
-    textGhost: '#8494a0', textInvis: '#c0cad0',
-    accent: '#d35400', accentSoft: '#e67e22', accentDim: '#f39c12',
-    green: '#28a745', greenDim: '#5cb85c', red: '#dc3545', redDim: '#e74c3c',
-    amber: '#ffc107', amberDim: '#f0c040', purple: '#6f42c1', purpleDim: '#8a55c0',
-    blue: '#007bff', blueDim: '#5dade2', cyan: '#17a2b8', cyanDim: '#5bc0de',
-    border: '#dee2e6', borderLight: '#e9ecef', codeBg: '#f8f9fa',
-    spinFrames: SPIN_FRAMES_BRAILLE, spinMs: 100, borderStyle: 'line',
-  },
-  coffee: {
-    bg: '#2c1e10', surface: '#241a0c', surfaceHi: '#3a2a18',
-    text: '#e8d5b8', textDim: '#c4a882', textMuted: '#a08868',
-    textGhost: '#9a8860', textInvis: '#745838',
-    accent: '#d4a054', accentSoft: '#c49450', accentDim: '#8a6a3a',
-    green: '#6aab6a', greenDim: '#3a6a3a', red: '#cc5555', redDim: '#6a3333',
-    amber: '#ccaa44', amberDim: '#6a5522', purple: '#aa88cc', purpleDim: '#5a446a',
-    blue: '#6699cc', blueDim: '#334466', cyan: '#66cccc', cyanDim: '#336666',
-    border: '#4a3a20', borderLight: '#5a4a30', codeBg: '#1a1008',
-    spinFrames: SPIN_FRAMES_MOON, spinMs: 150, borderStyle: 'double',
-  },
-  gruvbox: {
-    bg: '#282828', surface: '#3c3836', surfaceHi: '#504945',
-    text: '#ebdbb2', textDim: '#d5c4a1', textMuted: '#bdae93',
-    textGhost: '#b2a394', textInvis: '#9c8f84',
-    accent: '#fe8019', accentSoft: '#fabd2f', accentDim: '#b8bb26',
-    green: '#b8bb26', greenDim: '#98971a', red: '#fb4934', redDim: '#cc241d',
-    amber: '#fabd2f', amberDim: '#d79921', purple: '#d3869b', purpleDim: '#b16286',
-    blue: '#83a598', blueDim: '#458588', cyan: '#8ec07c', cyanDim: '#689d6a',
-    border: '#504945', borderLight: '#665c54', codeBg: '#1d2021',
-    spinFrames: SPIN_FRAMES_ARROW, spinMs: 90, borderStyle: 'bold',
-  },
-  dracula: {
-    bg: '#282a36', surface: '#343746', surfaceHi: '#44475a',
-    text: '#f8f8f2', textDim: '#cccac2', textMuted: '#aaa8a0',
-    textGhost: '#8292c4', textInvis: '#64677a',
-    accent: '#ff79c6', accentSoft: '#bd93f9', accentDim: '#6272a4',
-    green: '#50fa7b', greenDim: '#00b956', red: '#ff5555', redDim: '#cc3333',
-    amber: '#f1fa8c', amberDim: '#d4d4aa', purple: '#bd93f9', purpleDim: '#8a6fd0',
-    blue: '#6272a4', blueDim: '#44475a', cyan: '#8be9fd', cyanDim: '#5fc4d4',
-    border: '#44475a', borderLight: '#6272a4', codeBg: '#1e1f29',
-    spinFrames: SPIN_FRAMES_CLOCK, spinMs: 70, borderStyle: 'double',
-  },
-  nord: {
-    bg: '#2e3440', surface: '#3b4252', surfaceHi: '#434c5e',
-    text: '#eceff4', textDim: '#d8dee9', textMuted: '#aeb6c2',
-    textGhost: '#819eb0', textInvis: '#6c768a',
-    accent: '#88c0d0', accentSoft: '#81a1c1', accentDim: '#5e81ac',
-    green: '#a3be8c', greenDim: '#8faa7b', red: '#bf616a', redDim: '#a3555a',
-    amber: '#ebcb8b', amberDim: '#d4a96a', purple: '#b48ead', purpleDim: '#9a7a9a',
-    blue: '#81a1c1', blueDim: '#6a8aaa', cyan: '#88c0d0', cyanDim: '#6aabb0',
-    border: '#4c566a', borderLight: '#5e81ac', codeBg: '#242933',
-    spinFrames: SPIN_FRAMES_BRAILLE, spinMs: 110, borderStyle: 'round',
-  },
-  solarized: {
-    bg: '#002b36', surface: '#073642', surfaceHi: '#0a4a5a',
-    text: '#839496', textDim: '#93a1a1', textMuted: '#657b83',
-    textGhost: '#789ea5', textInvis: '#275662',
-    accent: '#b58900', accentSoft: '#cb4b16', accentDim: '#dc322f',
-    green: '#859900', greenDim: '#586e75', red: '#dc322f', redDim: '#cb4b16',
-    amber: '#b58900', amberDim: '#93a1a1', purple: '#6c71c4', purpleDim: '#586e75',
-    blue: '#268bd2', blueDim: '#2aa198', cyan: '#2aa198', cyanDim: '#268bd2',
-    border: '#0a4a5a', borderLight: '#586e75', codeBg: '#001e26',
-    spinFrames: SPIN_FRAMES_CLOCK, spinMs: 130, borderStyle: 'line',
-  },
-  monokai: {
-    bg: '#272822', surface: '#3e3d32', surfaceHi: '#49483e',
-    text: '#f8f8f2', textDim: '#cfcfc2', textMuted: '#a0a090',
-    textGhost: '#95917e', textInvis: '#69685e',
-    accent: '#f92672', accentSoft: '#ae81ff', accentDim: '#66d9ef',
-    green: '#a6e22e', greenDim: '#7aaf20', red: '#f92672', redDim: '#cc3355',
-    amber: '#e6db74', amberDim: '#c4be60', purple: '#ae81ff', purpleDim: '#9060c0',
-    blue: '#66d9ef', blueDim: '#40b0d0', cyan: '#66d9ef', cyanDim: '#40b0d0',
-    border: '#49483e', borderLight: '#5e5d50', codeBg: '#1a1b16',
-    spinFrames: SPIN_FRAMES_ARROW, spinMs: 60, borderStyle: 'bold',
-  },
-  tokyoNight: {
-    bg: '#1a1b26', surface: '#24283b', surfaceHi: '#414868',
-    text: '#c0caf5', textDim: '#a9b1d6', textMuted: '#565f89',
-    textGhost: '#5b6281', textInvis: '#3f4355',
-    accent: '#ff9e64', accentSoft: '#bb9af7', accentDim: '#7dcfff',
-    green: '#9ece6a', greenDim: '#73daca', red: '#f7768e', redDim: '#db4b4b',
-    amber: '#e0af68', amberDim: '#c0a860', purple: '#bb9af7', purpleDim: '#9060c0',
-    blue: '#7aa2f7', blueDim: '#5a7cd0', cyan: '#7dcfff', cyanDim: '#5fb0d0',
-    border: '#414868', borderLight: '#565f89', codeBg: '#16161e',
-    spinFrames: SPIN_FRAMES_DOTS, spinMs: 85, borderStyle: 'round',
-  },
-  matrix: {
-    bg: '#0a0a0a', surface: '#0d1a0d', surfaceHi: '#142814',
-    text: '#00ff41', textDim: '#00cc33', textMuted: '#009926',
-    textGhost: '#006619', textInvis: '#00330d',
-    accent: '#00ff41', accentSoft: '#00cc33', accentDim: '#009926',
-    green: '#00ff41', greenDim: '#00cc33', red: '#ff0033', redDim: '#cc0026',
-    amber: '#ccff00', amberDim: '#99cc00', purple: '#33ff33', purpleDim: '#26cc26',
-    blue: '#00ff99', blueDim: '#00cc7a', cyan: '#00ffcc', cyanDim: '#00cc99',
-    border: '#00330d', borderLight: '#004d14', codeBg: '#050a05',
-    spinFrames: SPIN_FRAMES_ARROW, spinMs: 50, borderStyle: 'bold',
-  },
-  synthwave: {
-    bg: '#1a1030', surface: '#241848', surfaceHi: '#2e2060',
-    text: '#f0e0ff', textDim: '#c8b0e0', textMuted: '#a090c0',
-    textGhost: '#7868a0', textInvis: '#504080',
-    accent: '#ff6ec7', accentSoft: '#ff9ed6', accentDim: '#cc5aa0',
-    green: '#36fca8', greenDim: '#28c888', red: '#ff3366', redDim: '#cc2952',
-    amber: '#ffcc00', amberDim: '#ccaa00', purple: '#ff77ff', purpleDim: '#cc5ecc',
-    blue: '#00ccff', blueDim: '#00a0cc', cyan: '#00ffcc', cyanDim: '#00cc99',
-    border: '#3a2070', borderLight: '#4a3080', codeBg: '#120820',
-    spinFrames: SPIN_FRAMES_CLOCK, spinMs: 75, borderStyle: 'double',
-  },
-  rosePine: {
-    bg: '#191724', surface: '#1f1d2e', surfaceHi: '#26233a',
-    text: '#e0def4', textDim: '#c4c0e0', textMuted: '#a090c0',
-    textGhost: '#7060a0', textInvis: '#504080',
-    accent: '#eb6f92', accentSoft: '#f090a8', accentDim: '#cc5a78',
-    green: '#9ccfd8', greenDim: '#80b0c0', red: '#eb6f92', redDim: '#cc5a78',
-    amber: '#f6c177', amberDim: '#d0a060', purple: '#c4a7e7', purpleDim: '#a088c0',
-    blue: '#9ccfd8', blueDim: '#80b0c0', cyan: '#9ccfd8', cyanDim: '#80b0c0',
-    border: '#26233a', borderLight: '#302d44', codeBg: '#13111e',
-    spinFrames: SPIN_FRAMES_BRAILLE, spinMs: 100, borderStyle: 'round',
-  },
-  catppuccin: {
-    bg: '#1e1e2e', surface: '#28283d', surfaceHi: '#313244',
-    text: '#cdd6f4', textDim: '#bac2de', textMuted: '#a6adc8',
-    textGhost: '#7f849c', textInvis: '#585b70',
-    accent: '#f5c2e7', accentSoft: '#f0b8d8', accentDim: '#cc9eb8',
-    green: '#a6e3a1', greenDim: '#88cc88', red: '#f38ba8', redDim: '#cc6e88',
-    amber: '#f9e2af', amberDim: '#d0c090', purple: '#cba6f7', purpleDim: '#a888cc',
-    blue: '#89dceb', blueDim: '#70b8cc', cyan: '#94e2d5', cyanDim: '#78b8ac',
-    border: '#313244', borderLight: '#45475a', codeBg: '#181825',
-    spinFrames: SPIN_FRAMES_DOTS, spinMs: 90, borderStyle: 'round',
-  },
-  oneDark: {
-    bg: '#282c34', surface: '#2c313a', surfaceHi: '#353b45',
-    text: '#abb2bf', textDim: '#9ca3af', textMuted: '#737c8c',
-    textGhost: '#5c6370', textInvis: '#3e4451',
-    accent: '#61afef', accentSoft: '#7ec0ee', accentDim: '#4a90d9',
-    green: '#98c379', greenDim: '#7ca860', red: '#e06c75', redDim: '#c05060',
-    amber: '#e5c07b', amberDim: '#c0a060', purple: '#c678dd', purpleDim: '#a060bb',
-    blue: '#61afef', blueDim: '#4a90d9', cyan: '#56b6c2', cyanDim: '#4090a0',
-    border: '#3e4451', borderLight: '#4b5263', codeBg: '#21252b',
-    spinFrames: SPIN_FRAMES_ARROW, spinMs: 85, borderStyle: 'line',
-  },
-  materialPalenight: {
-    bg: '#292d3e', surface: '#2f3347', surfaceHi: '#373d57',
-    text: '#d8dee9', textDim: '#b8c0d0', textMuted: '#9098b0',
-    textGhost: '#687090', textInvis: '#444a64',
-    accent: '#c792ea', accentSoft: '#d4a8f0', accentDim: '#aa78cc',
-    green: '#c3e88d', greenDim: '#a0c070', red: '#f07178', redDim: '#cc5860',
-    amber: '#ffcb6b', amberDim: '#d0a850', purple: '#c792ea', purpleDim: '#aa78cc',
-    blue: '#82aaff', blueDim: '#6090dd', cyan: '#89ddff', cyanDim: '#70b8cc',
-    border: '#373d57', borderLight: '#444a64', codeBg: '#222638',
-    spinFrames: SPIN_FRAMES_MOON, spinMs: 95, borderStyle: 'double',
-  },
-  cyberpunk: {
-    bg: '#0a0a14', surface: '#12121f', surfaceHi: '#1a1a2f',
-    text: '#00ffff', textDim: '#00cccc', textMuted: '#009999',
-    textGhost: '#006666', textInvis: '#003333',
-    accent: '#ff00ff', accentSoft: '#cc00cc', accentDim: '#990099',
-    green: '#00ff66', greenDim: '#00cc52', red: '#ff0033', redDim: '#cc0029',
-    amber: '#ffcc00', amberDim: '#ccaa00', purple: '#ff00ff', purpleDim: '#cc00cc',
-    blue: '#00ccff', blueDim: '#00a0cc', cyan: '#00ffcc', cyanDim: '#00cc99',
-    border: '#1a1a2f', borderLight: '#252540', codeBg: '#06060e',
-    spinFrames: SPIN_FRAMES_CLOCK, spinMs: 60, borderStyle: 'bold',
-  },
-  arctic: {
-    bg: '#f0f4f8', surface: '#e8eef4', surfaceHi: '#dde4ec',
-    text: '#1a2332', textDim: '#3a4a5a', textMuted: '#5a6a7a',
-    textGhost: '#7a8a9a', textInvis: '#b0c0d0',
-    accent: '#0077cc', accentSoft: '#0088dd', accentDim: '#0066bb',
-    green: '#28a745', greenDim: '#3cb95a', red: '#dc3545', redDim: '#e05060',
-    amber: '#ffc107', amberDim: '#ffcd39', purple: '#6f42c1', purpleDim: '#8555d0',
-    blue: '#007bff', blueDim: '#339dff', cyan: '#17a2b8', cyanDim: '#45b8cc',
-    border: '#c8d4e0', borderLight: '#d8e4f0', codeBg: '#e0e8f0',
-    spinFrames: SPIN_FRAMES_BRAILLE, spinMs: 110, borderStyle: 'line',
-  },
-  ember: {
-    bg: '#1a0f0a', surface: '#241810', surfaceHi: '#2e2018',
-    text: '#ffeedd', textDim: '#ddc8b0', textMuted: '#bba088',
-    textGhost: '#998070', textInvis: '#604838',
-    accent: '#ff6633', accentSoft: '#ff8855', accentDim: '#cc5528',
-    green: '#66cc66', greenDim: '#55aa55', red: '#ff3333', redDim: '#cc2828',
-    amber: '#ffaa33', amberDim: '#cc8828', purple: '#cc66cc', purpleDim: '#aa55aa',
-    blue: '#6699ff', blueDim: '#5580dd', cyan: '#66cccc', cyanDim: '#55aaaa',
-    border: '#3a2818', borderLight: '#4a3828', codeBg: '#120a06',
-    spinFrames: SPIN_FRAMES_MOON, spinMs: 80, borderStyle: 'double',
-  },
-  lavender: {
-    bg: '#f5f0ff', surface: '#ece6ff', surfaceHi: '#e0d8f8',
-    text: '#2d1f4e', textDim: '#4a3a6a', textMuted: '#6a5a88',
-    textGhost: '#8a7aa6', textInvis: '#c0b8d8',
-    accent: '#7c3aed', accentSoft: '#8b5cf6', accentDim: '#6d28d9',
-    green: '#10b981', greenDim: '#34d399', red: '#ef4444', redDim: '#f87171',
-    amber: '#f59e0b', amberDim: '#fbbf24', purple: '#8b5cf6', purpleDim: '#a78bfa',
-    blue: '#3b82f6', blueDim: '#60a5fa', cyan: '#06b6d4', cyanDim: '#22d3ee',
-    border: '#d8d0f0', borderLight: '#e4dcf8', codeBg: '#e8e0ff',
-    spinFrames: SPIN_FRAMES_DOTS, spinMs: 100, borderStyle: 'round',
-  },
-  midnight: {
-    bg: '#0d1117', surface: '#161b22', surfaceHi: '#1c2129',
-    text: '#c9d1d9', textDim: '#8b949e', textMuted: '#6e7681',
-    textGhost: '#484f58', textInvis: '#30363d',
-    accent: '#58a6ff', accentSoft: '#79b8ff', accentDim: '#388bfd',
-    green: '#3fb950', greenDim: '#56d364', red: '#f85149', redDim: '#ff7b72',
-    amber: '#d29922', amberDim: '#e3b341', purple: '#bc8cff', purpleDim: '#d2a8ff',
-    blue: '#58a6ff', blueDim: '#79b8ff', cyan: '#39d2c0', cyanDim: '#56d4c8',
-    border: '#30363d', borderLight: '#484f58', codeBg: '#0d1117',
-    spinFrames: SPIN_FRAMES_ARROW, spinMs: 90, borderStyle: 'line',
-  },
-  sunset: {
-    bg: '#1a1020', surface: '#241830', surfaceHi: '#2e2040',
-    text: '#ffe0cc', textDim: '#ddc0a0', textMuted: '#bba088',
-    textGhost: '#998070', textInvis: '#604838',
-    accent: '#ff6b35', accentSoft: '#ff8855', accentDim: '#cc5528',
-    green: '#4ecdc4', greenDim: '#3cb8b0', red: '#ff6b6b', redDim: '#cc5555',
-    amber: '#ffe66d', amberDim: '#d0c060', purple: '#a06cd5', purpleDim: '#8855bb',
-    blue: '#6c9bcf', blueDim: '#5580bb', cyan: '#4ecdc4', cyanDim: '#3cb8b0',
-    border: '#3a2050', borderLight: '#4a3060', codeBg: '#120818',
-    spinFrames: SPIN_FRAMES_CLOCK, spinMs: 70, borderStyle: 'double',
-  },
-  ocean: {
-    bg: '#0a1628', surface: '#0f2035', surfaceHi: '#152842',
-    text: '#e0f0ff', textDim: '#a0c0e0', textMuted: '#7098c0',
-    textGhost: '#5080a8', textInvis: '#305878',
-    accent: '#00b4d8', accentSoft: '#48cae4', accentDim: '#0096c7',
-    green: '#52b788', greenDim: '#409070', red: '#e76f51', redDim: '#c05540',
-    amber: '#f4a261', amberDim: '#d08850', purple: '#7b68ee', purpleDim: '#6050cc',
-    blue: '#0077b6', blueDim: '#005f90', cyan: '#00b4d8', cyanDim: '#0096c7',
-    border: '#1a3550', borderLight: '#254560', codeBg: '#061018',
-    spinFrames: SPIN_FRAMES_BRAILLE, spinMs: 120, borderStyle: 'round',
-  },
-  vaporwave: {
-    bg: '#1a0a2e', surface: '#241440', surfaceHi: '#2e1e52',
-    text: '#ff71ce', textDim: '#cc5aa8', textMuted: '#994488',
-    textGhost: '#663368', textInvis: '#331848',
-    accent: '#01cdfe', accentSoft: '#44d4ff', accentDim: '#00a0cc',
-    green: '#05ffa1', greenDim: '#04cc80', red: '#ff6b6b', redDim: '#cc5555',
-    amber: '#fffb96', amberDim: '#d0c870', purple: '#b967ff', purpleDim: '#9855cc',
-    blue: '#01cdfe', blueDim: '#00a0cc', cyan: '#05ffa1', cyanDim: '#04cc80',
-    border: '#3a1860', borderLight: '#4a2870', codeBg: '#120620',
-    spinFrames: SPIN_FRAMES_CLOCK, spinMs: 65, borderStyle: 'bold',
-  },
-};
-
-function getTheme(name) {
-  return THEMES[name] || THEMES.dark;
-}
 
 let T = getTheme('dark');
 let globalStore = null;
@@ -320,391 +48,6 @@ global.__zynApplyTheme = (name) => {
     globalStore._emit();
   }
 };
-
-class UIStore extends EventEmitter {
-  constructor() {
-    super();
-    this.setMaxListeners(50);
-    this.items = [];
-    this.liveThinking = null;
-    this.liveAnswer = null;
-    this.spinner = null;
-    this.processing = false;
-    this.confirmRequest = null;
-    this.selectRequest = null;
-    this.inputRequest = null;
-    this.lastUserMessage = '';
-    this.inputDraft = '';
-    this.turnCount = 0;
-    this.messageQueue = [];
-    this.pendingExit = false;
-    this.lastEscapeAt = -1;
-    this.submittedHistory = [];
-    this.submittedRedo = [];
-    this.conversationHistory = [];
-    this.conversationRedo = [];
-    this.thinkingHistory = [];
-    this.tokenEstimate = 0;
-    this.contextLimit = 0;
-    this.themeVersion = 0;
-    this._idCounter = 0;
-    this._scheduled = false;
-    this._lastEmitAt = 0;
-    this._streamingActive = false;
-    this._lastThinkingEmit = 0;
-    this._lastAnswerEmit = 0;
-    this.showThinking = false;
-  }
-
-  setShowThinking(val) {
-    this.showThinking = !!val;
-    const expand = this.showThinking;
-    this.items = this.items.map(it => it.type === 'thinking' ? { ...it, expanded: expand, id: String(++this._idCounter) } : it);
-    this._emit();
-  }
-
-  toggleAllThinking(expand) {
-    this.items = this.items.map(it => it.type === 'thinking' ? { ...it, expanded: expand, id: String(++this._idCounter) } : it);
-    this._emit();
-  }
-
-  addItem(item) {
-    this._idCounter += 1;
-    this.items = [...this.items, { ...item, id: String(this._idCounter) }];
-    this._emit();
-  }
-
-  setSpinner(label) {
-    this.spinner = label ? { label, started: Date.now() } : null;
-    this._emit();
-  }
-
-  beginThinking() {
-    this.liveThinking = { text: '', started: Date.now() };
-    this._streamingActive = true;
-    this._emit();
-  }
-
-  appendThinking(delta) {
-    if (!this.liveThinking) return;
-    this.liveThinking = { ...this.liveThinking, text: this.liveThinking.text + delta };
-    const now = Date.now();
-    if (now - this._lastThinkingEmit < THINKING_THROTTLE_MS) return;
-    this._lastThinkingEmit = now;
-    this._emit();
-  }
-
-  endThinking() {
-    if (!this.liveThinking) return;
-    const elapsed = ((Date.now() - this.liveThinking.started) / 1000).toFixed(1);
-    const text = this.liveThinking.text.trim();
-    this.liveThinking = null;
-    this._lastThinkingEmit = 0;
-    if (!text) return;
-    this.thinkingHistory.push({ text, elapsed, timestamp: Date.now() });
-    if (this.thinkingHistory.length > 20) this.thinkingHistory.shift();
-    this.addItem({ type: 'thinking', text, elapsed, expanded: this.showThinking });
-  }
-
-  beginAnswer() {
-    this.liveAnswer = { text: '' };
-    this._streamingActive = true;
-    this._emit();
-  }
-
-  appendAnswer(delta) {
-    if (!this.liveAnswer) return;
-    this.liveAnswer = { ...this.liveAnswer, text: this.liveAnswer.text + delta };
-    this._updateTokenEstimate(delta);
-    const now = Date.now();
-    if (now - this._lastAnswerEmit < THINKING_THROTTLE_MS) return;
-    this._lastAnswerEmit = now;
-    this._emit();
-  }
-
-  endAnswer() {
-    if (!this.liveAnswer) return false;
-    this._lastAnswerEmit = 0;
-    const text = this.liveAnswer.text;
-    const trimmed = (text || '').trim();
-    let skip = false;
-    if (trimmed) {
-      try {
-        const parsed = parseAgentResponse(trimmed);
-        if (parsed?.type === 'tool') {
-          skip = true;
-        } else if (parsed?.type === 'final' && typeof parsed.content === 'string') {
-          const c = parsed.content.trim();
-          skip = !c || c.startsWith('{') || c.startsWith('[');
-        }
-      } catch {}
-    }
-    let added = false;
-    if (!skip) {
-      this.addItem({ type: 'answer', text });
-      added = true;
-    }
-    this.liveAnswer = null;
-    this._streamingActive = false;
-    return added;
-  }
-
-  _updateTokenEstimate(delta) {
-    if (!delta) return;
-    this.tokenEstimate += Math.ceil(delta.length * 0.25);
-  }
-
-  setTokenEstimate(estimate, limit) {
-    this.tokenEstimate = estimate;
-    this.contextLimit = limit;
-    this._emit();
-  }
-
-  setTokenUsage(usage) {
-    if (usage && typeof usage.completionTokens === 'number' && usage.completionTokens > 0) {
-      this.tokenEstimate = (usage.promptTokens || 0) + (usage.completionTokens || 0);
-      this._emit();
-    }
-  }
-
-  addEvent(kind, title, detail) {
-    this.addItem({ type: 'event', kind, title, detail: detail || '' });
-  }
-
-  updateLastEventTitle(title) {
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      if (this.items[i].type === 'event' && this.items[i].kind === 'tool') {
-        this.items = this.items.map((item, idx) => idx === i ? { ...item, title } : item);
-        this._emit();
-        return;
-      }
-    }
-  }
-
-  setInputDraft(text) {
-    const nextDraft = String(text || '');
-    if (nextDraft === this.inputDraft) return;
-    this.inputDraft = nextDraft;
-    this._emit();
-  }
-
-  requestConfirm(title, detail) {
-    return new Promise(resolve => {
-      this.confirmRequest = { title, detail, resolve };
-      this._emit();
-    });
-  }
-
-  resolveConfirm(answer) {
-    if (!this.confirmRequest) return;
-    this.confirmRequest.resolve(answer);
-    this.confirmRequest = null;
-    this._emit();
-  }
-
-  requestSelect(options) {
-    return new Promise(resolve => {
-      const marker = Symbol('select');
-      this._selectMarker = marker;
-      setImmediate(() => {
-        if (this._selectMarker !== marker) {
-          resolve(null);
-          return;
-        }
-        this.selectRequest = { ...options, resolve, selected: Number.isInteger(options?.initialIndex) ? options.initialIndex : 0 };
-        this._emit();
-      });
-    });
-  }
-
-  resolveSelect(value) {
-    if (!this.selectRequest) return;
-    this.selectRequest.resolve(value);
-    this.selectRequest = null;
-    this._emit();
-  }
-
-  cancelSelect() {
-    this._selectMarker = null;
-    if (!this.selectRequest) return;
-    this.selectRequest.resolve(null);
-    this.selectRequest = null;
-    this._emit();
-  }
-
-  adjustSelect(delta) {
-    if (!this.selectRequest) return;
-    const total = this.selectRequest.items?.length || 0;
-    if (total === 0) return;
-    const next = (this.selectRequest.selected + delta + total) % total;
-    this.selectRequest.selected = next;
-    this._emit();
-  }
-
-  requestInput(options) {
-    return new Promise(resolve => {
-      const marker = Symbol('input');
-      this._inputMarker = marker;
-      setImmediate(() => {
-        if (this._inputMarker !== marker) {
-          resolve(null);
-          return;
-        }
-        this.inputRequest = { ...options, resolve, value: '' };
-        this._emit();
-      });
-    });
-  }
-
-  cancelInput() {
-    if (!this.inputRequest) return;
-    this.inputRequest.resolve(null);
-    this.inputRequest = null;
-    this._emit();
-  }
-
-  async requestAskUser(question, allItems, customLabel) {
-    const selectResult = await this.requestSelect({
-      title: question,
-      items: allItems,
-      getLabel: (item) => String(item),
-      getValue: (item) => item,
-    });
-
-    if (selectResult === null) return null;
-    if (selectResult === customLabel) {
-      const customResult = await this.requestInput({
-        title: question,
-        subtitle: '',
-        prompt: '>',
-      });
-      return customResult || null;
-    }
-    return String(selectResult);
-  }
-
-  appendInputChar(ch) {
-    if (!this.inputRequest) return;
-    if (ch === '\x1b' || ch === '\x1b\x1b' || ch === '\x03') {
-      this.inputRequest.resolve(null);
-      this.inputRequest = null;
-    } else if (ch === '\r' || ch === '\n') {
-      const value = this.inputRequest.value;
-      this.inputRequest.resolve(value);
-      this.inputRequest = null;
-    } else if (ch === '\x7f' || ch === '\b') {
-      this.inputRequest.value = this.inputRequest.value.slice(0, -1);
-    } else {
-      for (const c of ch) {
-        if (c.charCodeAt(0) >= 32) {
-          this.inputRequest.value += c;
-        }
-      }
-    }
-    this._emit();
-  }
-
-  enqueueMessage(text) {
-    this.messageQueue.push(text);
-    this.addItem({ type: 'queued', text });
-    this._emit();
-  }
-
-
-  pushSubmittedMessage(text) {
-    const value = String(text || '');
-    if (!value) return;
-    this.submittedHistory.unshift(value);
-    if (this.submittedHistory.length > 200) this.submittedHistory.pop();
-    this.submittedRedo = [];
-    this._emit();
-  }
-
-  addConversationTurn(userMsg, assistantMsg) {
-    this.conversationHistory.unshift({ user: userMsg, assistant: assistantMsg, timestamp: Date.now() });
-    if (this.conversationHistory.length > 100) this.conversationHistory.pop();
-    this.conversationRedo = [];
-    this._emit();
-  }
-
-  undoConversationTurn() {
-    if (this.conversationHistory.length === 0) return null;
-    const turn = this.conversationHistory.shift();
-    this.conversationRedo.unshift(turn);
-    this._removeLastConversationItems();
-    this._emit();
-    return turn;
-  }
-
-  redoConversationTurn() {
-    if (this.conversationRedo.length === 0) return null;
-    const turn = this.conversationRedo.shift();
-    this.conversationHistory.unshift(turn);
-    this.addItem({ type: 'user', text: turn.user });
-    this.addItem({ type: 'answer', text: turn.assistant });
-    this._emit();
-    return turn;
-  }
-
-  _removeLastConversationItems() {
-    let removed = 0;
-    const newItems = [];
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      if (removed < 2 && (this.items[i].type === 'user' || this.items[i].type === 'answer')) {
-        removed++;
-        continue;
-      }
-      newItems.unshift(this.items[i]);
-    }
-    if (removed > 0) {
-      this.items = newItems;
-      this._emit();
-    }
-  }
-
-  undoSubmittedMessage() {
-    if (this.submittedHistory.length === 0) return null;
-    const value = this.submittedHistory.shift();
-    this.submittedRedo.unshift(value);
-    this.setInputDraft(value);
-    this.addEvent('info', uiText('message restored', 'mensaje restaurado'), shortTextPreview(value, 120));
-    return value;
-  }
-
-  redoSubmittedMessage() {
-    if (this.submittedRedo.length === 0) return null;
-    const value = this.submittedRedo.shift();
-    this.submittedHistory.unshift(value);
-    this.setInputDraft(value);
-    this.addEvent('info', uiText('message reapplied', 'mensaje reaplicado'), shortTextPreview(value, 120));
-    return value;
-  }
-
-  _emit() {
-    if (this._scheduled) return;
-    this._scheduled = true;
-    setImmediate(() => {
-      this._scheduled = false;
-      this.emit('update');
-    });
-  }
-}
-
-function stripAnsi(str) {
-  return str.replace(/\x1b\[[0-9;]*m/g, '');
-}
-
-function shortTextPreview(str, maxLen) {
-  const s = String(str || '').replace(/\n/g, ' ').trim();
-  return s.length > maxLen ? s.slice(0, maxLen - 3) + '...' : s;
-}
-
-function formatElapsed(ms) {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return s + 's';
-  const m = Math.floor(s / 60);
-  return m + 'm ' + (s % 60) + 's';
-}
 
 function useStore(store) {
   const [, setTick] = useState(0);
@@ -1077,38 +420,29 @@ function MarkdownContent({ text, width, live }) {
 }
 
 function Banner({ model, resumed, width, cwd }) {
-  const maxW = Math.max(30, Math.min(width - 4, 72));
-  const inner = maxW - 4;
-  const topLine = '  \u250c' + '\u2500'.repeat(maxW - 2) + '\u2510';
-  const botLine = '  \u2514' + '\u2500'.repeat(maxW - 2) + '\u2518';
-
-  const pad = (str) => {
-    const s = str.slice(0, inner);
-    return s + ' '.repeat(Math.max(0, inner - s.length));
-  };
-
-  const sessionLabel = resumed ? uiText('session resumed', 'sesion reanudada') : uiText('new session', 'sesion nueva');
-  const cwdShort = cwd && cwd.length > inner - 6 ? '...' + cwd.slice(-(inner - 9)) : (cwd || '.');
-
-  return h(Box, { flexDirection: 'column', paddingTop: 1, paddingBottom: 0 },
-    h(Text, { color: T.border }, topLine),
-    h(Box, {},
-      h(Text, { color: T.border }, '  \u2502 '),
-      h(Text, { color: T.accent, bold: true }, '> '),
-      h(Text, { color: T.text, bold: true }, pad(APP_NAME)),
-      h(Text, { color: T.border }, ' \u2502'),
-    ),
-    h(Box, {},
-      h(Text, { color: T.border }, '  \u2502 '),
-      h(Text, { color: T.textMuted }, pad('modelo: ' + model + ' \u00b7 ' + sessionLabel)),
-      h(Text, { color: T.border }, ' \u2502'),
-    ),
-    h(Box, {},
-      h(Text, { color: T.border }, '  \u2502 '),
-      h(Text, { color: T.textMuted }, pad('cwd: ' + cwdShort)),
-      h(Text, { color: T.border }, ' \u2502'),
-    ),
-    h(Text, { color: T.border }, botLine),
+  const { frameWidth } = layoutForWidth(width);
+  const sessionLabel = resumed ? uiText('session resumed', 'sesión reanudada') : uiText('new session', 'sesión nueva');
+  if (frameWidth < 16) {
+    return h(Box, { paddingLeft: 1, flexDirection: 'column' },
+      h(Text, { color: T.accent, bold: true, wrap: 'truncate-end' }, `> ${APP_NAME}`),
+      h(Text, { color: T.textMuted, wrap: 'truncate-end' }, model),
+    );
+  }
+  const inner = frameWidth - 4;
+  const pad = value => String(value).slice(0, inner).padEnd(inner, ' ');
+  const location = String(cwd || '.');
+  const cwdShort = location.length > inner - 5
+    ? '...' + location.slice(-Math.max(0, inner - 8))
+    : location;
+  const top = '┌' + '─'.repeat(frameWidth - 2) + '┐';
+  const bottom = '└' + '─'.repeat(frameWidth - 2) + '┘';
+  const row = value => `│ ${pad(value)} │`;
+  return h(Box, { flexDirection: 'column', paddingTop: 1, paddingLeft: 1 },
+    h(Text, { color: T.border }, top),
+    h(Text, { color: T.accent, bold: true }, row('> ' + APP_NAME)),
+    h(Text, { color: T.textMuted }, row(uiText('model: ', 'modelo: ') + model + ' · ' + sessionLabel)),
+    h(Text, { color: T.textMuted }, row('cwd: ' + cwdShort)),
+    h(Text, { color: T.border }, bottom),
   );
 }
 
@@ -1320,6 +654,7 @@ function SelectBar({ request, width }) {
   const items = Array.isArray(request.items) ? request.items : [];
   const total = items.length;
   const w = width || 100;
+  const compact = layoutForWidth(w).compact;
   const maxVisible = Math.max(5, Math.min(20, Math.floor(w / 5)));
   const safeIdx = Math.max(0, Math.min(request.selected || 0, total - 1));
   const half = Math.floor(maxVisible / 2);
@@ -1336,13 +671,18 @@ function SelectBar({ request, width }) {
     borderStyle: 'round',
     borderColor: T.borderLight,
   },
-    h(Box, { paddingTop: 0, paddingBottom: 0, paddingLeft: 1 },
-      h(Text, { color: T.amber, bold: true }, '> '),
-      h(Text, { color: T.text, bold: true }, request.title || 'Select'),
-      request.subtitle
-        ? h(Text, { color: T.textMuted }, '  ' + request.subtitle)
-        : null,
-    ),
+    compact
+      ? h(Box, { flexDirection: 'column', paddingLeft: 1 },
+          h(Text, { color: T.accent, bold: true, wrap: 'truncate-end' }, '> ' + (request.title || 'Select')),
+          request.subtitle
+            ? h(Text, { color: T.textMuted, wrap: 'truncate-end' }, String(request.subtitle).slice(0, Math.max(1, w - 8)))
+            : null,
+        )
+      : h(Box, { paddingLeft: 1 },
+          h(Text, { color: T.amber, bold: true }, '> '),
+          h(Text, { color: T.text, bold: true }, request.title || 'Select'),
+          request.subtitle ? h(Text, { color: T.textMuted }, '  ' + request.subtitle) : null,
+        ),
     h(Box, { flexDirection: 'column', paddingTop: 0 },
       ...visible.map((item, i) => {
         const realIdx = start + i;
@@ -1352,8 +692,10 @@ function SelectBar({ request, width }) {
         const prefix = isSelected ? '\u25b8 ' : '  ';
         const number = String(realIdx + 1).padStart(2, ' ');
         const color = isSelected ? T.accent : (active ? T.green : T.textMuted);
-        return h(Box, { key: realIdx, paddingLeft: 2 },
-          h(Text, { color, bold: isSelected }, `${prefix}${number} ${label}`),
+        const maxLabel = Math.max(1, w - (compact ? 12 : 9));
+        const shortLabel = String(label).length > maxLabel ? String(label).slice(0, maxLabel - 1) + '…' : label;
+        return h(Box, { key: realIdx, paddingLeft: compact ? 0 : 2 },
+          h(Text, { color, bold: isSelected, wrap: 'truncate-end' }, `${prefix}${number} ${shortLabel}`),
         );
       }),
       total > maxVisible
@@ -1364,13 +706,15 @@ function SelectBar({ request, width }) {
           )
         : null,
     ),
-    h(Box, { paddingTop: 0, paddingBottom: 0, paddingLeft: 1, gap: 2 },
-      h(Text, { color: T.textMuted }, '\u2191/\u2193'),
-      h(Text, { color: T.textGhost }, '\u00b7'),
-      h(Text, { color: T.textMuted }, uiText('Enter', 'Enter')),
-      h(Text, { color: T.textGhost }, '\u00b7'),
-      h(Text, { color: T.textMuted }, uiText('Esc', 'Esc')),
-    ),
+    compact
+      ? h(Text, { color: T.textMuted, wrap: 'truncate-end' }, '  ↑/↓ · Enter · Esc')
+      : h(Box, { paddingLeft: 1, gap: 2 },
+          h(Text, { color: T.textMuted }, '↑/↓'),
+          h(Text, { color: T.textGhost }, '·'),
+          h(Text, { color: T.textMuted }, 'Enter'),
+          h(Text, { color: T.textGhost }, '·'),
+          h(Text, { color: T.textMuted }, 'Esc'),
+        ),
   );
 }
 
@@ -1385,8 +729,9 @@ function StatusBar({ store, model, processing, width, turnCount }) {
     return () => clearInterval(t);
   }, [processing, frames.length, ms]);
 
-  const line = '\u2500'.repeat(Math.max(10, Math.min(width - 4, 120)));
-  const safeW = Math.max(width - 2, 20);
+  const layout = layoutForWidth(width);
+  const line = '\u2500'.repeat(Math.max(1, Math.min(layout.columns - 4, 120)));
+  const safeW = layout.statusWidth;
   const tokenEstimate = store.tokenEstimate || 0;
   const contextLimit = store.contextLimit || 0;
 
@@ -1403,6 +748,15 @@ function StatusBar({ store, model, processing, width, turnCount }) {
   const tokenColor = contextLimit > 0 && tokenEstimate > contextLimit * 0.85
     ? T.amber
     : T.textInvis;
+
+  if (layout.compact) {
+    const shortModel = String(model).slice(0, Math.max(1, layout.columns - 17));
+    return h(Box, { flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
+      h(Text, { color: T.border }, line),
+      h(Text, { color: T.textMuted, wrap: 'truncate-end' },
+        `> ${shortModel}${processing ? ' ...' : ''}  · /help`),
+    );
+  }
 
   return h(Box, { flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
     h(Box, {},
@@ -1483,21 +837,6 @@ function StaticItem({ item, width }) {
 }
 
 
-function sanitizeInputChunk(input) {
-  return String(input || '')
-    .replace(/\u001b\[200~/g, '')
-    .replace(/\u001b\[201~/g, '')
-    .replace(/\[200~/g, '')
-    .replace(/\[201~/g, '')
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
-    .replace(/\u001bP[\s\S]*?\u001b\\/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\t/g, ' ')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
-}
-
 function clampCursor(nextCursor, length) {
   return Math.max(0, Math.min(nextCursor, length));
 }
@@ -1573,23 +912,44 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
       ? [...SLASH_COMMANDS, ...localSlash].filter(c => ('/' + c.name).startsWith(currentValue.toLowerCase()))
       : [];
 
-    if (key?.backspace || key?.delete || input === '\b' || input === '\x7f' || input === '\u0008') {
-      if (currentCursor > 0) {
-        const nextValue = currentValue.slice(0, currentCursor - 1) + currentValue.slice(currentCursor);
-        commitValue(nextValue, currentCursor - 1);
-        setSuggestIdx(0);
-        suggestIdxRef.current = 0;
-      } else if (currentValue.length > 0) {
-        commitValue('', 0);
+    const event = normalizeInputEvent(input, key);
+    const batch = !key.ctrl && !key.meta ? splitSubmittedInput(input, key) : null;
+    if (batch) {
+      const first = currentValue.slice(0, currentCursor) + batch.complete[0] + currentValue.slice(currentCursor);
+      const messages = [first, ...batch.complete.slice(1)];
+      for (const message of messages) {
+        const text = message.trim();
+        if (!text) continue;
+        historyRef.current.unshift(text);
+        if (historyRef.current.length > 100) historyRef.current.pop();
+        onSubmit(text, { kind: 'paste', length: text.length, multiline: true });
+      }
+      commitValue(batch.rest, batch.rest.length);
+      setHistIdx(-1);
+      histIdxRef.current = -1;
+      setSuggestIdx(0);
+      suggestIdxRef.current = 0;
+      return;
+    }
+
+    const backspace = key?.backspace || input === '\b' || input === '\x7f' || input === '\u0008';
+    if (backspace || key?.delete) {
+      const edit = editDelete(currentValue, currentCursor, backspace ? 'backward' : 'forward');
+      if (edit.value !== currentValue) {
+        commitValue(edit.value, edit.cursor);
         setSuggestIdx(0);
         suggestIdxRef.current = 0;
       }
       return;
     }
 
-    if (key.return) {
-      let text = currentValue.trim();
-      if (!text) return;
+    if (event.submit) {
+      const updated = currentValue.slice(0, currentCursor) + event.text + currentValue.slice(currentCursor);
+      let text = updated.trim();
+      if (!text) {
+        if (event.text) commitValue(updated, currentCursor + event.text.length);
+        return;
+      }
       if (currentShowSuggestions && currentSuggestions.length > 0 && text === '/') {
         const cmd = currentSuggestions[suggestIdxRef.current] || currentSuggestions[0];
         if (cmd) text = `/${cmd.name}`;
@@ -1601,7 +961,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
       histIdxRef.current = -1;
       setSuggestIdx(0);
       suggestIdxRef.current = 0;
-      onSubmit(text, lastPasteMetaRef.current);
+      onSubmit(text, event.paste ? { kind: 'paste', length: event.text.length, multiline: /\n/.test(input) } : lastPasteMetaRef.current);
       lastPasteMetaRef.current = null;
       return;
     }
@@ -1658,14 +1018,14 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
     }
 
     if (key.leftArrow) {
-      const nextCursor = clampCursor(currentCursor - 1, currentValue.length);
+      const nextCursor = moveCursor(currentValue, currentCursor, -1);
       cursorRef.current = nextCursor;
       setCursor(nextCursor);
       return;
     }
 
     if (key.rightArrow) {
-      const nextCursor = clampCursor(currentCursor + 1, currentValue.length);
+      const nextCursor = moveCursor(currentValue, currentCursor, 1);
       cursorRef.current = nextCursor;
       setCursor(nextCursor);
       return;
@@ -1708,13 +1068,10 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
     }
 
     if (input && !key.ctrl && !key.meta) {
-      const normalizedInput = sanitizeInputChunk(input);
-      if (!normalizedInput) return;
-      const safeInput = normalizedInput.includes('\n')
-        ? normalizedInput.replace(/\n+/g, ' ')
-        : normalizedInput;
-      lastPasteMetaRef.current = safeInput.length > 1 || normalizedInput.includes('\n')
-        ? { kind: 'paste', length: safeInput.length, multiline: normalizedInput.includes('\n') }
+      const safeInput = event.text;
+      if (!safeInput) return;
+      lastPasteMetaRef.current = event.paste
+        ? { kind: 'paste', length: safeInput.length, multiline: /[\r\n]/.test(input) }
         : null;
       const nextValue = currentValue.slice(0, currentCursor) + safeInput + currentValue.slice(currentCursor);
       const nextCursor = currentCursor + safeInput.length;
@@ -1725,7 +1082,8 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
   });
 
   const hasText = value.length > 0;
-  const maxInputCols = Math.max(20, (width || 100) - 12);
+  const layout = layoutForWidth(width);
+  const maxInputCols = layout.inputColumns;
   let start = Math.max(0, cursor - Math.floor(maxInputCols * 0.7));
   if (value.length - start < maxInputCols) {
     start = Math.max(0, value.length - maxInputCols);
@@ -1739,7 +1097,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
   const promptColor = processing ? T.amber : T.accent;
   const placeholder = processing ? uiText(' Queued — type and it will run later...', ' En cola — escribe y se procesará después...') : uiText(' Type a message...', ' Escribe un mensaje...');
 
-  const inputLine = h(Box, { paddingLeft: 3, paddingRight: 3, paddingTop: 0, paddingBottom: 0, marginTop: 1 },
+  const inputLine = h(Box, { paddingLeft: layout.inputPadding, paddingRight: layout.inputPadding, paddingTop: 0, paddingBottom: 0, marginTop: 1 },
     h(Text, { color: promptColor }, processing ? '\u{1F4E9} ' : '\u276f '),
     hasText
       ? h(Box, {},
@@ -1749,7 +1107,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
         )
       : h(Box, {},
           h(Text, { color: promptColor, inverse: true }, ' '),
-          h(Text, { color: T.textGhost }, placeholder),
+          h(Text, { color: T.textGhost, wrap: 'truncate-end' }, placeholder.slice(0, Math.max(0, maxInputCols - 1))),
         ),
   );
 
@@ -1763,7 +1121,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
 
   return h(Box, { flexDirection: 'column' },
     inputLine,
-    h(Box, { flexDirection: 'column', paddingLeft: 5, marginTop: 0 },
+    h(Box, { flexDirection: 'column', paddingLeft: layout.compact ? 2 : 5, marginTop: 0 },
       hasMore && windowStart > 0
         ? h(Text, { color: T.textInvis }, '  \u2191 ' + uiText('more', 'más'))
         : null,
@@ -1778,7 +1136,7 @@ function InputBar({ onSubmit, processing, width = 100, draft = '', onDraftChange
           h(Text, {
             color: selected ? T.accent : T.textMuted,
           }, `/${cmd.name}`),
-          h(Text, { color: T.textGhost }, `  ${getTuiLang() === 'es' ? (cmd.descEs || cmd.desc) : cmd.desc}`),
+          !layout.compact ? h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `  ${getTuiLang() === 'es' ? (cmd.descEs || cmd.desc) : cmd.desc}`) : null,
         );
       }),
       hasMore && windowStart + maxVisible < suggestions.length
@@ -1855,11 +1213,7 @@ function App({ store, state, onSubmit }) {
           if (typeof state.abortCurrentTurn === 'function') {
             state.abortCurrentTurn();
           }
-          store.processing = false;
-          store.liveThinking = null;
-          store.liveAnswer = null;
-          store._emit();
-          store.addEvent('warn', uiText('agent stopped', 'agente detenido'), uiText('Interrupted with ESC', 'Interrumpido con ESC'));
+          store.addEvent('warn', uiText('stop requested', 'interrupción solicitada'), uiText('Waiting for the current turn to stop', 'Esperando a que termine la ejecución'));
           return;
         }
         store.lastEscapeAt = now;
@@ -2029,7 +1383,7 @@ function getUiBindings(store, state) {
 export async function startTUI(options = {}) {
   const { state, resumed, rehydrated } = await loadOrCreateSessionState(null, options);
   T = getTheme(state.theme || 'dark');
-  const store = new UIStore();
+  const store = new UIStore(uiText);
   globalStore = store;
   store.setShowThinking(state.settings?.showThinking);
 
@@ -2127,7 +1481,8 @@ export async function startTUI(options = {}) {
   } catch {}
 
   state.getQueuedMessages = () => {
-    const msgs = store.messageQueue.splice(0);
+    const msgs = store.messageQueue.filter(msg => !msg.startsWith('/'));
+    store.messageQueue = store.messageQueue.filter(msg => msg.startsWith('/'));
     if (msgs.length) store._emit();
     return msgs;
   };
@@ -2578,43 +1933,38 @@ export async function startTUI(options = {}) {
 
   let appInstance = null;
 
-  const handleSubmit = async (input, meta = null) => {
-    if (input.startsWith('/')) {
-      await processInput(input);
-      return;
-    }
-
-    if (store.processing) {
-      store.enqueueMessage(input);
-      return;
-    }
-
-    store.pushSubmittedMessage(input);
-    store.setInputDraft('');
-
-    store.processing = true;
-    store.turnCount += 1;
-    store._emit();
-
-    await processInput(input);
-
-    while (store.messageQueue.length > 0) {
-      const next = store.messageQueue.shift();
-      store.turnCount += 1;
-      store._emit();
-      await processInput(next);
-    }
-
-    store.processing = false;
-    store._emit();
-
-    if (store.pendingExit && appInstance) {
-      appInstance.unmount();
-    }
+  const handleSubmit = async (input) => {
+    await runSerialInputs({
+      store,
+      firstInput: input,
+      execute: async (next) => {
+        if (!next.startsWith('/')) {
+          store.pushSubmittedMessage(next);
+          store.setInputDraft('');
+          store.turnCount += 1;
+          store._emit();
+        }
+        await processInput(next);
+      },
+      onError: (error) => {
+        store.addEvent('error', uiText('command failed', 'comando fallido'), error?.message || String(error));
+      },
+    });
+    if (store.pendingExit && appInstance) appInstance.unmount();
   };
 
   appInstance = render(h(App, { store, state, onSubmit: handleSubmit }), {
     exitOnCtrlC: false,
   });
-  await appInstance.waitUntilExit();
+  const handleRawInput = chunk => {
+    if (String(chunk) === '\x1b\x1b') {
+      store.lastEscapeAt = Date.now();
+    }
+  };
+  process.stdin.prependListener('data', handleRawInput);
+  try {
+    await appInstance.waitUntilExit();
+  } finally {
+    process.stdin.off('data', handleRawInput);
+  }
 }

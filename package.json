@@ -32,7 +32,10 @@
   "scripts": {
     "start": "node zyn.js",
     "dev": "node zyn.js",
-    "check": "node scripts/check-syntax.js"
+    "check": "node scripts/check-syntax.js",
+    "test": "node --test tests/*.test.mjs",
+    "test:tui": "python3 tests/tui_pty.py",
+    "test:all": "npm run check && npm test && npm run test:tui"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -47,11 +50,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/SoyMaycol/Zyn"
+    "url": "https://github.com/toZyn/Zyn-Agent.git"
   },
-  "homepage": "https://github.com/SoyMaycol/Zyn#readme",
+  "homepage": "https://github.com/toZyn/Zyn-Agent#readme",
   "bugs": {
-    "url": "https://github.com/SoyMaycol/Zyn/issues"
+    "url": "https://github.com/toZyn/Zyn-Agent/issues"
   },
   "engines": {
     "node": ">=22"

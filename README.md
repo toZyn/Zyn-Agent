@@ -49,13 +49,13 @@ npm install -g zyn-ai
 npx zyn-ai
 
 # From source
-git clone https://github.com/SoyMaycol/Zyn.git
-cd Zyn
+git clone https://github.com/toZyn/Zyn-Agent.git
+cd Zyn-Agent
 npm install
 npm start
 ```
 
-**Requirements:** Node.js 18+
+**Requirements:** Node.js 22+
 
 ---
 
@@ -88,7 +88,7 @@ https://github.com/user-attachments/assets/a66690d6-db83-4d5a-8482-d0af98a8b7e4
 - **Background jobs** — `/bg` for long-running tasks, `/jobs` to manage them
 - **Streaming** — live token output, thinking indicators, cancel with ESC
 - **i18n** — English/Spanish with auto-detection
-- **No hard limits** — configurable timeouts, history size, context windows
+- **Configurable limits** — timeouts, history size and context windows are configurable; the TUI keeps the latest 400 rendered items while session history remains persisted
 
 ### Providers & Models
 
@@ -366,8 +366,8 @@ zyn/
 ## Development
 
 ```bash
-git clone https://github.com/SoyMaycol/Zyn.git
-cd Zyn
+git clone https://github.com/toZyn/Zyn-Agent.git
+cd Zyn-Agent
 npm install
 npm run check    # Syntax check critical files
 npm start        # Run TUI
@@ -394,11 +394,17 @@ npm start        # Run TUI
 
 ## Support
 
-- **Issues:** https://github.com/SoyMaycol/Zyn/issues
-- **Discussions:** https://github.com/SoyMaycol/Zyn/discussions
+- **Issues:** https://github.com/toZyn/Zyn-Agent/issues
+- **Discussions:** https://github.com/toZyn/Zyn-Agent/discussions
 
 ---
 
 ## License
 
 MIT © Maycol
+
+## Development and regression testing
+
+Run `npm ci`, `npm run check`, `npm test` and `npm run test:tui` on Node.js 22 or newer. The TUI integration suite requires Linux or another POSIX environment with Python 3 and a pseudo-terminal. `npm run test:all` runs all checks.
+
+See [Architecture](docs/ARCHITECTURE.md) and [TUI test coverage](docs/TUI_TESTING.md) for design boundaries, supported interactions, and remaining gaps.
