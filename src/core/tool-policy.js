@@ -18,7 +18,7 @@ function assertToolAllowed(call,state){
       throw new Error('This subagent role does not allow the requested tool.');
     }
     if(meta.role==='general') {
-      const approved = new Set(['list_dir','read_file','search_text','glob_files','file_info','fetch_url','fetch','fetch_http','webfetch','scrape_site','web_search','web_read','load_skill','memory','git','run_command','make_dir','write_file','append_file','replace_in_file']);
+      const approved = new Set(['list_dir','read_file','search_text','glob_files','file_info','fetch_url','fetch','fetch_http','webfetch','scrape_site','web_search','web_read','load_skill','memory','git','run_command','make_dir','write_file','append_file','replace_in_file','read_agent_messages','send_agent_message']);
       if(!approved.has(call?.tool)) throw new Error('The general subagent cannot invoke external plugins, MCP mutations, or account actions.');
       if(!toolIsReadOnly(call) && !['run_command','make_dir','write_file','append_file','replace_in_file'].includes(call?.tool)) {
         throw new Error('This subagent action must be completed by the parent agent.');

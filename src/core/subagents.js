@@ -82,9 +82,15 @@ class SubagentCoordinator {
   list() { return [...this.agents.values()].map(snapshot); }
 
   lookup(id) {
-    const entry = this.agents.get(String(id || ''));
-    if (!entry) throw new Error('Unknown subagent ID.');
-    return entry;
+    const requested = String(id || '');
+    const direct = this.agents.get(requested);
+    if (direct) return direct;
+    if (/^[a-f0-9-]{8,36}$/.test(requested)) {
+      const matches = [...this.agents.values()].filter(agent => agent.id.startsWith(requested));
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1) throw new Error('Ambiguous subagent ID prefix.');
+    }
+    throw new Error('Unknown subagent ID.');
   }
 
   persistMetadata() {
@@ -308,11 +314,17 @@ class SubagentCoordinator {
   }
 
   sendMessage(from, to, content) {
-    const sender = String(from || 'parent');
-    const recipient = String(to || 'parent');
+    let sender = 'parent';
+    let recipient = 'parent';
+    if (from !== 'parent') {
+      try { sender = this.lookup(from).id; }
+      catch { throw new Error('Unknown sender.'); }
+    }
+    if (to !== 'parent') {
+      try { recipient = this.lookup(to).id; }
+      catch { throw new Error('Unknown recipient agent.'); }
+    }
     const text = String(content || '').trim();
-    if (sender !== 'parent' && !this.agents.has(sender)) throw new Error('Unknown sender.');
-    if (recipient !== 'parent' && !this.agents.has(recipient)) throw new Error('Unknown recipient agent.');
     if (!text || text.length > 16000) throw new Error('Message must contain 1 to 16000 characters.');
     const message = { message_id: randomUUID(), from: sender, to: recipient, content: text, at: new Date().toISOString() };
     const list = this.mailboxes.get(recipient) || [];

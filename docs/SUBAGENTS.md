@@ -37,7 +37,7 @@ Use `/agents define storage-checker review Inspect disk usage without modifying 
 
 ## Inter-agent messages
 
-`send_agent_message { agent_id, message }` routes a message to a child, peer, or parent using `agent_id: "parent"`. `read_agent_messages {}` drains the current agent's mailbox. Messages are stored with the parent coordinator and preserved across restarts. Child agents can read queued messages between model/tool steps; idle agents can receive them during a later follow-up. `/agents send <id> <message>` and `/agents inbox` expose the same channel to the user. Messages cannot bypass tool permissions.
+`send_agent_message { agent_id, message }` routes a message to a child, peer, or parent using `agent_id: "parent"`. `/agents` displays a readable eight-character agent ID; unique prefixes of eight or more characters resolve to the original UUID, while ambiguous identifiers are rejected. `wait_agent` also includes unread messages addressed to the parent, so progress reports appear with the next wait result. `read_agent_messages {}` drains the current agent's mailbox. Messages are stored with the parent coordinator and preserved across restarts. Child agents can read queued messages between model/tool steps; idle agents can receive them during a later follow-up. `/agents send <id> <message>` and `/agents inbox` expose the same channel to the user. Messages cannot bypass tool permissions.
 
 ## Recovery boundaries
 

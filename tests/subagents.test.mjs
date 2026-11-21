@@ -156,6 +156,8 @@ test('general child cannot perform account or plugin actions without the parent'
   await manager.wait(job.agent_id, 1000);
   assert.doesNotThrow(() => assertToolAllowed({ tool: 'read_file', args: { path: 'README.md' } }, child));
   assert.doesNotThrow(() => assertToolAllowed({ tool: 'write_file', args: { path: 'README.md' } }, child));
+  assert.doesNotThrow(() => assertToolAllowed({ tool: 'send_agent_message', args: { agent_id: 'parent', message: 'Ready' } }, child));
+  assert.doesNotThrow(() => assertToolAllowed({ tool: 'read_agent_messages', args: {} }, child));
   assert.throws(() => assertToolAllowed({ tool: 'gmail', args: { action: 'send' } }, child), /cannot invoke/);
   assert.throws(() => assertToolAllowed({ tool: 'git', args: { action: 'api', method: 'POST' } }, child), /must be completed/);
   assert.throws(() => assertToolAllowed({ tool: 'mcp_external_write', args: {} }, child), /cannot invoke/);
@@ -189,4 +191,17 @@ test('mailbox does not silently drop older messages when many arrive',()=>{
   assert.equal(messages.length,140);
   assert.equal(messages[0].content,'Note 0');
   assert.equal(messages.at(-1).content,'Note 139');
+});
+
+
+test('displayed eight-character agent ID uniquely resolves to the full child session',async()=>{
+  const manager=new SubagentCoordinator({runTurn:async()=>({content:'done'})});
+  const p=parent('short-id');
+  const worker=manager.spawn(p,{task:'Inspect'});
+  const full=worker.agent_id;
+  assert.equal(manager.lookup(full.slice(0,8)).id,full);
+  assert.throws(()=>manager.lookup(full.slice(0,3)),/Unknown subagent ID/);
+  manager.sendMessage('parent',full.slice(0,8),'Please report findings');
+  assert.equal(manager.readMessages(full)[0].content,'Please report findings');
+  await manager.wait(full,1000);
 });
