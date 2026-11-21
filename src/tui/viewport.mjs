@@ -1,3 +1,4 @@
+import { formatEventPreview } from './event-display.mjs';
 export const DEFAULT_VISIBLE_ITEMS = 400;
 
 export function appendVisibleItem(items, item, limit = DEFAULT_VISIBLE_ITEMS) {
@@ -16,7 +17,10 @@ function estimateItemRows(item, columns) {
   switch (item.type) {
     case 'banner': return columns < 18 ? 2 : 6;
     case 'divider': return 1;
-    case 'event': return 1 + (item.detail ? estimateWrappedLines(item.detail, columns) : 0);
+    case 'event': {
+      const view = formatEventPreview(item, columns);
+      return 1 + view.lines.length + (view.hint ? 1 : 0);
+    }
     case 'user': return 2 + estimateWrappedLines(item.text, columns);
     case 'answer': return 2 + estimateWrappedLines(item.text, columns);
     case 'thinking': return item.expanded ? 2 + estimateWrappedLines(item.text, columns) : 2;

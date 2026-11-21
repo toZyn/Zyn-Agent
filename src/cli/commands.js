@@ -54,7 +54,7 @@ const SLASH_COMMANDS = [
   { name: 'model', desc: 'choose or switch model', descEs: 'elegir o cambiar modelo' },
   { name: 'login', desc: 'connect an account', descEs: 'conectar una cuenta' },
   { name: 'logout', desc: 'disconnect an account', descEs: 'desconectar una cuenta' },
-  { name: 'account', desc: 'ChatGPT account status', descEs: 'estado de la cuenta ChatGPT' },
+  { name: 'account', desc: 'connected accounts and provider overview', descEs: 'cuentas conectadas y proveedores' },
   { name: 'context', desc: 'show current context size estimate', descEs: 'ver estimación de contexto' },
   { name: 'stats', desc: 'show real session counts', descEs: 'mostrar métricas reales de sesión' },
   { name: 'usage', desc: 'show session usage estimate, not billing', descEs: 'uso estimado, sin facturación' },
@@ -341,7 +341,6 @@ async function runProviderModelsSelector(state, deps, providerKey) {
     MODELS[customKey] = {
       label: customModelId,
       provider: providerKey,
-      contextLength: 128000,
       ...extraFields,
     };
 
@@ -452,7 +451,25 @@ async function handleLocalCommand(input, state, deps) {
     console.log(require('./session-metrics').formatSessionMetrics(state, {contextOnly: commandName === 'context'}));
     return true;
   }
-  if (commandName === 'account') return handleLocalCommand('/auth chatgpt status', state, deps);
+  if (commandName === 'account') {
+    const { listAuthenticationStatus } = require('./essentials');
+    const auth = await listAuthenticationStatus();
+    const current = MODELS[state.activeModel];
+    const en = state.language !== 'es';
+    console.log(en ? 'Zyn · Accounts and providers' : 'Zyn · Cuentas y proveedores');
+    console.log(`${en ? 'Current model' : 'Modelo actual'}: ${modelDisplayId(state.activeModel || DEFAULT_MODEL_KEY, current)}`);
+    console.log(`${en ? 'Current provider' : 'Proveedor actual'}: ${current?.provider || 'unknown'}`);
+    for (const name of ['chatgpt', 'github', 'gmail']) {
+      const record = auth[name];
+      const status = record?.authenticated ? (en ? 'connected' : 'conectado') : record?.installed ? (en ? 'not connected' : 'sin conexión') : (en ? 'unavailable' : 'no disponible');
+      const label = {chatgpt:'ChatGPT',github:'GitHub',gmail:'Gmail'}[name];
+      console.log(`${label}: ${status}`);
+    }
+    const configured = listConfiguredProviders().map(item => item.provider).filter(Boolean);
+    if (configured.length) console.log(`${en ? 'API providers configured' : 'Proveedores API configurados'}: ${[...new Set(configured)].join(', ')}`);
+    console.log(en ? 'Manage connections with /auth or /login <provider>.' : 'Administra conexiones con /auth o /login <proveedor>.');
+    return true;
+  }
   if (commandName === 'login') {
     const platform = args.trim().toLowerCase();
     if (!platform) { console.log('Usage: /login chatgpt | /login github | /login gmail'); return true; }
@@ -905,10 +922,10 @@ async function handleLocalCommand(input, state, deps) {
     }
 
     const SETTINGS_SCHEMA = {
-      'max-tool-steps':       { key: 'maxToolSteps',         min: 1,      max: 500,     isFloat: false },
+      'max-tool-steps':       { key: 'maxToolSteps',         min: 0,      max: 50000,     isFloat: false },
       'request-timeout':      { key: 'requestTimeoutMs',     min: 5000,   max: 600000,  isFloat: false },
-      'max-history':          { key: 'maxHistoryChars',      min: 10000,  max: 2000000, isFloat: false },
-      'max-output':           { key: 'maxOutputChars',       min: 1000,   max: 500000,  isFloat: false },
+      'max-history':          { key: 'maxHistoryChars',      min: 0,  max: 200000000, isFloat: false },
+      'max-output':           { key: 'maxOutputChars',       min: 0,   max: 50000000,  isFloat: false },
       'max-file-lines':       { key: 'maxFileLines',         min: 100,    max: 100000,  isFloat: false },
       'keep-recent':          { key: 'keepRecentMessages',   min: 5,      max: 500,     isFloat: false },
       'compact-threshold':    { key: 'autoCompactThreshold', min: 0.1,    max: 1.0,     isFloat: true },

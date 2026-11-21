@@ -40,3 +40,7 @@ The first-run memory import now renders a three-line export prompt preview, neve
 On small screens, historical conversation items render directly above the input or confirmation panel; approval command detail is bounded by available terminal height, with `V` for expansion and arrow keys for scrolling. Pressing `Enter` in a permission panel denies by default. This is a UI change, not an increase in shell-command permissions.
 
 These are offline interface tests; the local authorization mock never contacts an account provider, so actual browser/OAuth compatibility still requires a user-authorized live check.
+
+## Recoverable onboarding and exact usage reporting (unreleased)
+
+`tests/ux_recovery_pty.py` exercises a first-run session with an invalid export (`b`, followed by `:save`), verifies that the assistant re-prompts without crashing, then pastes a valid export and checks the private profile file. It inspects actual ANSI color escapes and framed terminal banners at mobile-sized widths, checks tool-summary viewport behavior and validates an in-place model switch. `tests/chatgpt_pty.py` uses a simulated OAuth response that reports exactly 153 tokens and verifies that the TUI displays `153/?` rather than a fabricated 128K context window. `tests/ux-context-regression.test.mjs` covers provider metadata, measured usage, non-lossy default tool-output handling, default limit behavior and repeated-action detection.

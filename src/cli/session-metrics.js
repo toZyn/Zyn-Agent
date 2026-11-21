@@ -21,6 +21,7 @@ function sessionMetrics(state = {}) {
     contextCharacters: contextText.length,
     estimatedTokens: estimateTokens(history.map(item => item?.content || '').join('\n') + '\n' + contextText),
     contextLength,
+    measuredTokens: Number(state.lastTokenUsage?.totalTokens || 0) || null,
   };
 }
 
@@ -34,6 +35,7 @@ function formatSessionMetrics(state, { contextOnly = false } = {}) {
     `${es ? 'Caracteres de memoria/perfil' : 'Memory/profile characters'}: ${stats.contextCharacters}`,
     `${es ? 'Tokens estimados (texto, no medición)' : 'Estimated tokens (text approximation, not measured)'}: ${stats.estimatedTokens}`,
     `${es ? 'Límite de contexto declarado' : 'Declared context limit'}: ${stats.contextLength || (es ? 'no disponible' : 'unavailable')}`,
+    `${es ? 'Uso medido por proveedor (última solicitud)' : 'Provider-measured tokens (last request)'}: ${stats.measuredTokens ?? (es ? 'no disponible' : 'unavailable')}` ,
   ];
   if (!contextOnly) {
     lines.push(`${es ? 'Turnos' : 'Turns'}: ${stats.turns}`,

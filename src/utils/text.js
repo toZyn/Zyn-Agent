@@ -35,7 +35,7 @@ function normalizeText(value) {
 }
 
 function truncateText(value, limit = MAX_OUTPUT_CHARS, lang = 'es') {
-  if (value.length <= limit) {
+  if (!Number.isFinite(limit) || limit <= 0 || value.length <= limit) {
     return value;
   }
   const removed = value.length - limit;

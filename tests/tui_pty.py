@@ -151,7 +151,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.term.send(b'\x1b', 0.3)
         self.term.send(b'/exit\r', 0.3)
         self.assertEqual(self.term.wait_exit(), 0)
-        self.assertTrue(any(('◇ Zyn' in line or '╭' in line) and len(line) <= 30 for line in self.term.text.splitlines()))
+        self.assertTrue(any(('┌' in line or '╭' in line) and len(line) <= 30 for line in self.term.text.splitlines()))
 
     def test_very_small_terminal_can_quit(self):
         self.term.resize(12, 12)

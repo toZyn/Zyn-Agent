@@ -13,6 +13,8 @@ npm install -g zyn-ai
 zyn
 ```
 
+Development-only changes are tracked in [unreleased terminal and context fixes](docs/UNRELEASED_UX.md).
+
 **Release channels:** GitHub may contain a newer version than npm. An npm update is published separately after explicit maintainer approval.
 
 From source:
@@ -28,7 +30,7 @@ npm start
 
 ## First launch and imported memory
 
-On the first interactive launch, Zyn offers an **optional** profile import. The screen shows a three-line preview of the export prompt, never the entire prompt by default. Press `C` and Enter to copy it to the clipboard (Termux API, a supported desktop clipboard, or terminal OSC52), then `P` and Enter to paste the export. Complete the import with `:save`, or cancel with `:cancel`. Clipboard support is terminal-dependent and explicitly reported as unverified when it cannot be confirmed.
+On the first interactive launch, Zyn offers an **optional** profile import. The screen shows a three-line preview of the export prompt, never the entire prompt by default. Press `C` and Enter to copy it to the clipboard (Termux API, a supported desktop clipboard, or terminal OSC52), then `P` and Enter to paste the export. Complete the import with `:save`, or cancel with `:cancel`. If the pasted text does not contain the required export sections, Zyn explains the problem and lets you paste it again without exiting. Clipboard support is terminal-dependent and explicitly reported as unverified when it cannot be confirmed.
 
 The import remains on your machine until you choose to use a model. New Zyn sessions receive a copy of the imported profile, and resumed sessions use their stored copy. Profiles are treated as **user-provided context, not trusted instructions**. They may be sent to the selected model provider as part of the model's prompt. Review exported content and remove information you do not want to share before importing it.
 
@@ -64,7 +66,7 @@ This implementation is independent of the separately licensed OpenAI Sign in wit
 
 The main commands are organized by workflow. Run `/help` in the TUI, `/help <command>` for focused usage, or `zyn help` in the shell. All discoverable commands are listed in the [full command reference](docs/COMMANDS.md).
 
-Examples: `/model` opens the selector, `/model <id>` switches models, `/login chatgpt` opens authorization, `/context` displays a labeled text-only token estimate, and `/stats` reports observable session counters. Neither `/stats` nor `/usage` claims to read your provider's billing data.
+Examples: `/model` opens the selector, `/model <id>` switches models, `/login chatgpt` opens authorization, `/account` shows connected accounts and the active provider (ChatGPT, GitHub and Gmail), `/context` displays provider-measured usage when supplied as well as labeled local estimates, and `/stats` reports observable session counters. Neither `/stats` nor `/usage` claims to read your provider's billing data.
 
 The native `zyn auth` command also supports `status`, `list`, `github login|status|logout`, `gmail login|status|logout`, and the ChatGPT login/status/models/logout flow. Model IDs displayed in selectors and status bars are the actual provider IDs (`gpt-6-luna` rather than `chatgpt-gpt-6-luna`). Old prefixed session keys remain supported for migration. English is the default language even when the operating system uses a different locale; use `/lang` for a language picker, or `/lang es` and `/lang en` to switch immediately without restarting. GitHub and Gmail require their respective installed official CLIs (or other existing supported credentials).
 
@@ -81,6 +83,15 @@ The native `zyn auth` command also supports `status`, `list`, `github login|stat
 | Stop or exit | `/stop`, `/exit` |
 
 Commands use the same underlying handlers in the classic CLI and the TUI wherever possible. Some selectors are rendered differently. Run `/help` for the complete grouped reference.
+
+
+## Context, tool execution and terminal stability
+
+Zyn uses model-specific context metadata when the provider supplies it. If the provider does not publish a verified context window, Zyn displays `?` instead of inventing a number. Actual token usage is reported from provider responses when available; `~` identifies an approximation. `/context` shows both measurements independently. This does not modify provider quotas or create unlimited context.
+
+The defaults for `max-tool-steps`, `max-history` and `max-output` are now `0`, which means **no arbitrary application-level cap** for those settings. Users can set an explicit limit with `/settings` to manage machine resources. Repeated identical tool calls that produce no progress trigger a protective pause. Normal permission approval, provider request timeouts, file-reading pagination and context-size constraints remain in effect.
+
+On mobile terminals, the framed header and colored activity indicators use the existing theme palette. Long tool output is summarized in the live viewport while the original tool result remains available in `/transcript`. The scroll viewport uses the displayed summary height rather than treating every hidden character as an extra terminal row.
 
 ## Universal Agent Skills
 

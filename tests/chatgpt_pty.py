@@ -27,6 +27,7 @@ class ChatGPTDirectTests(unittest.TestCase):
             while 'Direct ChatGPT account path verified' not in term.text and time.monotonic()<deadline and term.proc.poll() is None:
                 term.read(0.2)
             self.assertIn('Direct ChatGPT account path verified',term.text)
+            self.assertIn('153/?',term.text)
             self.assertIsNone(term.proc.poll())
             term.send(b'/exit\r',0.35)
             self.assertEqual(term.wait_exit(),0)

@@ -138,6 +138,66 @@ async function collectMemoryExport(rl, output = console.log) {
   return null;
 }
 
+function styleTerminal(text, color, output) {
+  if (!output?.isTTY || process.env.NO_COLOR !== undefined || process.env.TERM === 'dumb') return text;
+  const colors = { accent: '36', warn: '33', success: '32', subtle: '2', title: '1;36' };
+  return `\x1b[${colors[color] || '0'}m${text}\x1b[0m`;
+}
+
+function renderOnboardingIntro(output, language, columns) {
+  const es = language === 'es';
+  const width = Math.max(30, Math.min(70, (columns || 64) - 4));
+  const inner = width - 4;
+  const lines = [
+    es ? 'Zyn · Configuración inicial' : 'Zyn · Optional setup',
+    es ? '¿Importar tu perfil de otra aplicación?' : 'Import your profile from another app?',
+    es ? 'Puedes omitirlo y configurarlo después.' : 'Optional. You can configure it later.',
+  ];
+  const row = value => `│ ${String(value).slice(0, inner).padEnd(inner)} │`;
+  const border = char => char + '─'.repeat(width - 2) + (char === '╭' ? '╮' : '╯');
+  const content = [border('╭'), ...lines.map(row), border('╰')];
+  return content.map((line, i) => styleTerminal(line, i === 1 ? 'title' : i === 2 ? 'subtle' : 'accent', output)).join('\n');
+}
+
+function renderMemoryPrompt(output, prompt, columns, language) {
+  const lines = formatOnboardingPreview(prompt, columns, language).split('\n');
+  return lines.map((line, index) => {
+    const color = index === 0 ? 'title' : index === lines.length - 1 ? 'success' : line.startsWith('│') ? 'subtle' : 'accent';
+    return styleTerminal(line, color, output);
+  }).join('\n');
+}
+
+async function collectValidatedMemoryExport(rl, output, lang = 'en') {
+  const es = lang === 'es';
+  let lines = [];
+  let bytes = 0;
+  output.write(es ? '  Pega la exportación. Escribe :save para guardar o :cancel para salir.\n' : '  Paste the export. Type :save to save or :cancel to skip.\n');
+  for await (const line of rl) {
+    if (line.trim() === ':cancel') return null;
+    if (line.trim() === ':save') {
+      try {
+        const clean = parseImportedMemory(lines.join('\n'));
+        await saveImportedProfile(clean);
+        return clean;
+      } catch (error) {
+        output.write(styleTerminal(es ? '  Invalid export. Debe contener ## MEMORIES y ## PREFERENCES. Vuelve a pegarla o escribe :cancel.\n' : '  Invalid export. Include ## MEMORIES and ## PREFERENCES. Paste the full export again, or type :cancel.\n', 'warn', output));
+        lines = [];
+        bytes = 0;
+        continue;
+      }
+    }
+    bytes += Buffer.byteLength(line, 'utf8') + 1;
+    if (bytes > MAX_IMPORT_BYTES) {
+      lines = [];
+      bytes = 0;
+      output.write(styleTerminal(es ? '  Exportación demasiado grande; pega una versión más pequeña.\n' : '  Export exceeds the import size limit; paste a smaller export.\n', 'warn', output));
+      continue;
+    }
+    lines.push(line);
+  }
+  return null;
+}
+
 async function firstRunMemoryOnboarding({ input = process.stdin, output = process.stdout, ask, readLines, copy = require('./clipboard').copyToClipboard, language } = {}) {
   if (!input.isTTY || !output.isTTY || await hasSeenMemoryOnboarding()) return false;
   const { DEFAULT_LANGUAGE } = require('../config');
@@ -146,14 +206,14 @@ async function firstRunMemoryOnboarding({ input = process.stdin, output = proces
   const readline = require('node:readline/promises');
   const rl = readline.createInterface({ input, output, terminal: true });
   try {
-    output.write(`\n  ◇ Zyn · ${es ? 'Configuración opcional' : 'Optional setup'}\n`);
-    const response = ask ? await ask(rl) : await rl.question(es ? '  ¿Importar memoria de otra aplicación? [s/N] ' : '  Import your profile from another app? [y/N] ');
+    output.write('\n' + renderOnboardingIntro(output, lang, output.columns) + '\n' + styleTerminal(es ? '  [Y] Importar     [N] Omitir' : '  [Y] Import     [N] Skip', 'success', output) + '\n');
+    const response = ask ? await ask(rl) : await rl.question('  › ');
     if (!/^(s|si|sí|y|yes)$/i.test(String(response).trim())) {
       await markMemoryOnboarding();
       return false;
     }
     const columns = output.columns || 64;
-    output.write(`\n${formatOnboardingPreview(EXPORT_PROMPT, columns, lang)}\n`);
+    output.write(`\n${renderMemoryPrompt(output, EXPORT_PROMPT, columns, lang)}\n`);
     while (true) {
       const choice = (await rl.question(es ? '  [C] Copiar  [P] Pegar  [N] Omitir: ' : '  [C] Copy  [P] Paste  [N] Skip: ')).trim().toLowerCase();
       if (choice === 'n' || choice === ':cancel') { await markMemoryOnboarding(); return false; }
@@ -169,13 +229,13 @@ async function firstRunMemoryOnboarding({ input = process.stdin, output = proces
       if (choice === 'p' || choice === '') break;
       output.write(es ? '  Selecciona C, P o N.\n' : '  Choose C, P or N.\n');
     }
-    const pasted = readLines ? await readLines(rl) : await collectMemoryExport(rl, text => output.write(`${es ? 'Pega el resultado; finaliza con :save' : 'Paste the export; finish with :save'}\n`));
+    const pasted = readLines ? await readLines(rl) : await collectValidatedMemoryExport(rl, output, lang);
     if (pasted === null) return false;
-    await saveImportedProfile(pasted);
+    if (readLines) await saveImportedProfile(pasted);
     await markMemoryOnboarding();
     output.write(es ? '  ✓ Memoria guardada para las nuevas sesiones.\n' : '  ✓ Profile saved for future sessions.\n');
     return true;
   } finally { rl.close(); }
 }
 
-module.exports = { PROFILE_FILE, ONBOARDING_FILE, MAX_IMPORT_BYTES, getMemoryExportPrompt, formatOnboardingPreview, parseImportedMemory, saveImportedProfile, readImportedProfile, clearImportedProfile, markMemoryOnboarding, hasSeenMemoryOnboarding, collectMemoryExport, firstRunMemoryOnboarding };
+module.exports = { PROFILE_FILE, ONBOARDING_FILE, MAX_IMPORT_BYTES, getMemoryExportPrompt, formatOnboardingPreview, parseImportedMemory, saveImportedProfile, readImportedProfile, clearImportedProfile, markMemoryOnboarding, hasSeenMemoryOnboarding, collectMemoryExport, collectValidatedMemoryExport, firstRunMemoryOnboarding };

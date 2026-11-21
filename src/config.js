@@ -522,7 +522,7 @@ const BUILTIN_MODELS = {
   'replicate-llama-3.1-405b': { label: 'Llama 3.1 405B (Replicate)', provider: 'replicate', modelId: 'meta/meta-llama-3.1-405b-instruct', contextLength: 131072 },
   'replicate-llama-3.1-8b': { label: 'Llama 3.1 8B (Replicate)', provider: 'replicate', modelId: 'meta/meta-llama-3.1-8b-instruct', contextLength: 131072 },
 
-  'chatgpt-account': { label: 'ChatGPT plan · automatic', provider: 'chatgpt', contextLength: 128000 },
+  'chatgpt-account': { label: 'ChatGPT plan · automatic', provider: 'chatgpt' },
 
   // ===== Zyn Cloud =====
   'zyncloud-minimax-m3-thinking': { label: 'Minimax M3 Thinking', provider: 'zyncloud', modelId: 'minimax-m3-thinking', contextLength: 128000 },
@@ -604,7 +604,7 @@ function loadChatGPTModelCache(registered = {}) {
     if (!/^[a-zA-Z0-9._:-]{1,100}$/.test(model?.slug || '')) continue;
     collected[resolveAccountModelKey(model.slug, { ...registered, ...collected })] = {
       label: `${String(model.label || model.slug).slice(0,120)} (ChatGPT plan)`,
-      provider: 'chatgpt', modelId: model.slug, contextLength: 128000,
+      provider: 'chatgpt', modelId: model.slug, ...(Number.isSafeInteger(model.contextLength) && model.contextLength > 0 ? { contextLength: model.contextLength } : {}),
     };
   }
   return collected;
@@ -626,14 +626,14 @@ const DEFAULT_LANGUAGE = normalizeLanguage(process.env.ZYN_DEFAULT_LANG || proce
 const HUGGINGFACE_TOKEN = process.env.ZYN_HUGGINGFACE_TOKEN || process.env.HF_TOKEN || '';
 const GEMINI_API_KEY = process.env.ZYN_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
 
-const MAX_TOOL_STEPS = Number(process.env.ZYN_MAX_TOOL_STEPS || 100);
+const MAX_TOOL_STEPS = Number(process.env.ZYN_MAX_TOOL_STEPS ?? 0);
 
 const REQUEST_TIMEOUT_MS = Number(process.env.ZYN_REQUEST_TIMEOUT_MS || 120000);
 const ACTION_LOG_LIMIT = 100;
-const MAX_HISTORY_CHARS = Number(process.env.ZYN_MAX_HISTORY_CHARS || 200000);
+const MAX_HISTORY_CHARS = Number(process.env.ZYN_MAX_HISTORY_CHARS ?? 0);
 const MAX_FILE_LINES = Number(process.env.ZYN_MAX_FILE_LINES || 10000);
 const KEEP_RECENT_MESSAGES = 50;
-const MAX_OUTPUT_CHARS = Number(process.env.ZYN_MAX_OUTPUT_CHARS || 50000);
+const MAX_OUTPUT_CHARS = Number(process.env.ZYN_MAX_OUTPUT_CHARS ?? 0);
 const AUTO_COMPACT_THRESHOLD = 0.75;
 
 const DEFAULT_CONTEXT_LIMIT = 128000;
@@ -643,9 +643,11 @@ function countTokens(str) {
   return Math.ceil(str.length * 0.25);
 }
 
-function estimateContextTokens(state) {
+function estimateContextTokens(state = {}) {
   let total = 0;
-  if (state.memorySummary) total += countTokens(state.memorySummary);
+  for (const field of ['memorySummary', 'importedMemory', 'personaPrompt']) {
+    if (state[field]) total += countTokens(state[field]);
+  }
   if (Array.isArray(state.history)) {
     for (const msg of state.history) {
       if (msg.content) total += countTokens(msg.content) + 4;
@@ -656,7 +658,7 @@ function estimateContextTokens(state) {
 
 function getContextLimit(modelKey) {
   const model = MODELS[modelKey];
-  return (model && model.contextLength) || DEFAULT_CONTEXT_LIMIT;
+  return Number.isSafeInteger(model?.contextLength) && model.contextLength > 0 ? model.contextLength : 0;
 }
 
 function stripBase64Images(text) {

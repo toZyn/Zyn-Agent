@@ -34,6 +34,7 @@ export class UIStore extends EventEmitter {
     this.conversationRedo = [];
     this.thinkingHistory = [];
     this.tokenEstimate = 0;
+    this.lastMeasuredTokens = null;
     this.contextLimit = 0;
     this.themeVersion = 0;
     this._idCounter = 0;
@@ -164,8 +165,9 @@ export class UIStore extends EventEmitter {
   }
 
   setTokenUsage(usage) {
-    if (usage && typeof usage.completionTokens === 'number' && usage.completionTokens > 0) {
-      this.tokenEstimate = (usage.promptTokens || 0) + (usage.completionTokens || 0);
+    const measured = Number(usage?.totalTokens || ((usage?.promptTokens || 0) + (usage?.completionTokens || 0)));
+    if (Number.isFinite(measured) && measured > 0) {
+      this.lastMeasuredTokens = measured;
       this._emit();
     }
   }

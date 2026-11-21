@@ -8,7 +8,7 @@ global.fetch = async (input, options) => {
     const request = JSON.parse(options.body);
     if (request.store !== false || request.stream !== true || request.model !== 'tui-test-model')throw new Error('Invalid ChatGPT account request');
     const answer = JSON.stringify({type:'final',content:'Direct ChatGPT account path verified'});
-    const frame = `data: ${JSON.stringify({type:'response.output_text.delta',delta:answer})}\n\ndata: {"type":"response.completed"}\n\n`;
+    const frame = `data: ${JSON.stringify({type:'response.output_text.delta',delta:answer})}\n\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":123,"output_tokens":30,"total_tokens":153}}}\n\n`;
     return new Response(frame,{status:200,headers:{'Content-Type':'text/event-stream'}});
   }
   return originalFetch(input,options);

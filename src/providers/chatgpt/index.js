@@ -4,6 +4,7 @@ const { MODELS, USER_DATA_ROOT } = require('../../config');
 const { getChatGPTAccessToken } = require('../../auth/chatgpt');
 const { resolveAccountModelKey } = require('../model-id');
 const BASE_URL = 'https://api.openai.com/v1';
+const { contextFromProviderModel } = require('../context-metadata');
 
 async function fetchAvailableChatGPTModels(options = {}) {
   const token = await (options.getAccessToken || getChatGPTAccessToken)(options);
@@ -14,7 +15,7 @@ async function fetchAvailableChatGPTModels(options = {}) {
   const body = await response.json();
   if (!Array.isArray(body.models)) throw new Error('ChatGPT did not return a model list');
   return body.models.filter(model => model?.visibility === 'list' && typeof model.slug === 'string' && /^[a-zA-Z0-9._:-]{1,100}$/.test(model.slug))
-    .map(model => ({ slug: model.slug, label: String(model.display_name || model.slug).slice(0,120) }));
+    .map(model => ({ slug: model.slug, label: String(model.display_name || model.slug).slice(0,120), ...contextFromProviderModel(model) }));
 }
 
 async function refreshChatGPTCatalog(options = {}) {
@@ -24,7 +25,7 @@ async function refreshChatGPTCatalog(options = {}) {
   }
   for (const model of models) {
     const key = resolveAccountModelKey(model.slug, MODELS);
-    const descriptor = { label: model.label, provider: 'chatgpt', modelId: model.slug, contextLength: 128000 };
+    const descriptor = { label: model.label, provider: 'chatgpt', modelId: model.slug, ...(model.contextLength ? {contextLength: model.contextLength} : {}) };
     MODELS[key] = descriptor;
     const legacy = `chatgpt-${model.slug}`;
     if (!Object.prototype.hasOwnProperty.call(MODELS, legacy)) {
@@ -61,7 +62,7 @@ async function runChatGPTResponses(messages, modelId, onChunk, options = {}) {
   if (!response.body) throw new Error('ChatGPT returned no response stream');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = '', output = '', completed = false, bytes = 0;
+  let buffer = '', output = '', completed = false, bytes = 0, usage = null;
   const consume = chunk => {
     const event = parseSseFrame(chunk);
     if (!event) return;
@@ -73,7 +74,13 @@ async function runChatGPTResponses(messages, modelId, onChunk, options = {}) {
     if (event.type === 'response.failed' || event.type === 'error') {
       throw new Error(String(event.response?.error?.message || event.error?.message || event.message || 'ChatGPT response failed').slice(0,300));
     }
-    if (event.type === 'response.completed') completed = true;
+    if (event.type === 'response.completed') {
+      completed = true;
+      const measured = event.response?.usage;
+      if (measured) {
+        usage = { promptTokens: Number(measured.input_tokens || 0), completionTokens: Number(measured.output_tokens || 0), totalTokens: Number(measured.total_tokens || 0) };
+      }
+    }
   };
   try {
     while (true) {
@@ -93,6 +100,6 @@ async function runChatGPTResponses(messages, modelId, onChunk, options = {}) {
     if (buffer.trim()) consume(buffer);
   } finally { reader.releaseLock(); }
   if (!completed) throw new Error('ChatGPT stream ended without response.completed');
-  return { text: output, thinking: '', usage: null, hasContent: Boolean(output.trim()) };
+  return { text: output, thinking: '', usage, hasContent: Boolean(output.trim()) };
 }
 module.exports = { fetchAvailableChatGPTModels, refreshChatGPTCatalog, runChatGPTResponses };

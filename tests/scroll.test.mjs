@@ -39,3 +39,10 @@ test('scroll position is clamped after many evictions', () => {
   for (let i=0; i<2000; i++) store.addItem({type:'event',title:String(i)});
   assert.ok(store.scrollOffset >= 0 && store.scrollOffset < store.items.length);
 });
+
+test('viewport estimates the collapsed event height rather than the full raw tool output',()=>{
+ const text='Exit code: 0\nSTDOUT: '+('x'.repeat(9000));
+ const items=[{type:'event',id:'a',title:'first',detail:text},{type:'event',id:'b',title:'second',detail:text}];
+ const visible=selectViewportItems(items,{columns:52,rows:12});
+ assert.equal(visible.length,2);
+});

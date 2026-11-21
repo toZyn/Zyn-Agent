@@ -863,18 +863,14 @@ function parseSingleAgentResponse(text) {
 }
 
 function sanitizeArgsForModel(parsed) {
-  const args = { ...(parsed.args || {}) };
-  if (typeof args.command === 'string' && args.command.length > 4000) {
-    args.command = `${args.command.slice(0, 4000)} ...`;
-  }
-  return args;
+  return { ...(parsed.args || {}) };
 }
 
 function truncateHistory(state) {
   if (!Array.isArray(state.history) || state.history.length === 0) return;
   const totalChars = state.history.reduce((sum, m) => sum + (m.content?.length || 0), 0);
   const maxHistory = getSetting(state, 'maxHistoryChars');
-  if (totalChars <= maxHistory) return;
+  if (!Number.isFinite(maxHistory) || maxHistory <= 0 || totalChars <= maxHistory) return;
 
   const keepRecent = getSetting(state, 'keepRecentMessages');
   const keep = Math.min(keepRecent, state.history.length);
@@ -925,7 +921,7 @@ function buildConversationMessages(state, turnMessages, systemPrompt) {
 function buildToolResultMessage(parsed, result, language = 'es') {
   let cleanResult = typeof result === 'string' ? result : String(result || '');
   cleanResult = stripBase64Images(cleanResult);
-  const maxResultChars = MAX_OUTPUT_CHARS || 50000;
+  const maxResultChars = MAX_OUTPUT_CHARS > 0 ? MAX_OUTPUT_CHARS : Infinity;
   const truncated = cleanResult.length > maxResultChars
     ? `${cleanResult.slice(0, maxResultChars)}\n... [${language === 'en' ? 'truncated result' : 'resultado truncado'}, ${cleanResult.length} ${language === 'en' ? 'total chars' : 'caracteres totales'}]`
     : cleanResult;

@@ -240,7 +240,7 @@ async function fetchZenModels(config) {
     model.name || titleize(model.id || model.name),
     {
       zenModel: model.id || model.name,
-      contextLength: Number(model.context_length || model.max_tokens || model.max_context_length || 0) || undefined,
+      contextLength: Number(model.context_length || model.max_context_length || 0) || undefined,
       raw: model,
     },
   )).filter(item => item.modelId);
@@ -260,7 +260,7 @@ async function fetchQwenapiModels(config) {
       model.name || model.id,
       {
         qwenapiModel: model.id,
-        contextLength: Number(model.context_length || model.max_tokens || model.max_context_length || 0) || undefined,
+        contextLength: Number(model.context_length || model.max_context_length || 0) || undefined,
         raw: model,
       },
     )).filter(item => item.modelId);
@@ -323,7 +323,7 @@ async function fetchCustomModels(config) {
         model.name || titleize(model.id || model.name || model.model),
         {
           customModel: model.id || model.name || model.model,
-          contextLength: Number(model.context_length || model.max_tokens || model.max_context_length || 0) || undefined,
+          contextLength: Number(model.context_length || model.max_context_length || 0) || undefined,
           raw: model,
         },
       )).filter(item => item.modelId);
@@ -378,7 +378,7 @@ async function fetchHuggingFaceModels(config) {
       model.name || titleize(model.id || model.modelId || model.name),
       {
         huggingfaceModel: model.id || model.modelId || model.name,
-        contextLength: Number(model.context_length || model.max_tokens || model.max_context_length || 0) || undefined,
+        contextLength: Number(model.context_length || model.max_context_length || 0) || undefined,
         raw: model,
       },
     )).filter(item => item.modelId);
@@ -439,7 +439,7 @@ async function fetchGroqModels(config) {
   });
   const list = Array.isArray(data?.data) ? data.data : [];
   return list.map(model => buildModelRecord(
-    'groq', config, model.id, model.id, { modelId: model.id, contextLength: model.context_window || 128000 },
+    'groq', config, model.id, model.id, { modelId: model.id, contextLength: model.context_window || undefined },
   ));
 }
 
@@ -452,7 +452,7 @@ async function fetchTogetherModels(config) {
   });
   const list = Array.isArray(data?.data) ? data.data : [];
   return list.filter(m => m.type === 'chat').map(model => buildModelRecord(
-    'together', config, model.id, model.display_name || model.id, { modelId: model.id, contextLength: model.context_length || 128000 },
+    'together', config, model.id, model.display_name || model.id, { modelId: model.id, contextLength: model.context_length || undefined },
   ));
 }
 
@@ -465,7 +465,7 @@ async function fetchOpenRouterModels(config) {
   const data = await fetchJson('https://openrouter.ai/api/v1/models', { headers });
   const list = Array.isArray(data?.data) ? data.data : [];
   return list.map(model => buildModelRecord(
-    'openrouter', config, model.id, model.name || model.id, { modelId: model.id, contextLength: model.context_length || 128000 },
+    'openrouter', config, model.id, model.name || model.id, { modelId: model.id, contextLength: model.context_length || undefined },
   ));
 }
 
@@ -478,7 +478,7 @@ async function fetchMistralModels(config) {
   });
   const list = Array.isArray(data?.data) ? data.data : [];
   return list.map(model => buildModelRecord(
-    'mistral', config, model.id, model.name || model.id, { modelId: model.id, contextLength: model.max_context_length || 128000 },
+    'mistral', config, model.id, model.name || model.id, { modelId: model.id, contextLength: model.max_context_length || undefined },
   ));
 }
 
@@ -574,7 +574,7 @@ async function fetchGitHubModels(config) {
   });
   const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
   return list.map(model => buildModelRecord(
-    'github', config, model.id, model.name || model.id, { modelId: model.id, contextLength: model.context_length || 128000 },
+    'github', config, model.id, model.name || model.id, { modelId: model.id, contextLength: model.context_length || undefined },
   ));
 }
 
@@ -659,7 +659,7 @@ async function fetchNovitaModels(config) {
   });
   const list = Array.isArray(data?.data) ? data.data : [];
   return list.map(model => buildModelRecord(
-    'novita', config, model.id, model.id, { modelId: model.id, contextLength: model.context_length || 128000 },
+    'novita', config, model.id, model.id, { modelId: model.id, contextLength: model.context_length || undefined },
   ));
 }
 
@@ -672,7 +672,7 @@ async function fetchChutesModels(config) {
   });
   const list = Array.isArray(data?.data) ? data.data : [];
   return list.map(model => buildModelRecord(
-    'chutes', config, model.id, model.id, { modelId: model.id, contextLength: model.context_length || 32768 },
+    'chutes', config, model.id, model.id, { modelId: model.id, contextLength: model.context_length || undefined },
   ));
 }
 

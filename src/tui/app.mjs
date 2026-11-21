@@ -4,6 +4,7 @@ import { getTheme, SPIN_FRAMES } from './themes.mjs';
 import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
 import { selectViewportItems } from './viewport.mjs';
 import { confirmationViewport } from './confirmation-view.mjs';
+import { formatEventPreview } from './event-display.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
 import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor, mouseWheelSteps } from './input-events.mjs';
@@ -424,19 +425,29 @@ function MarkdownContent({ text, width, live }) {
 }
 
 function Banner({ model, resumed, width, cwd }) {
-  const columns = Math.max(14, width - 5);
+  const { frameWidth } = layoutForWidth(width);
+  const sessionLabel = resumed ? uiText('session resumed', 'sesión reanudada') : uiText('new session', 'sesión nueva');
+  if (frameWidth < 16) {
+    return h(Box, { paddingLeft: 1, flexDirection: 'column' },
+      h(Text, { color: T.accent, bold: true, wrap: 'truncate-end' }, `> ${APP_NAME}`),
+      h(Text, { color: T.textMuted, wrap: 'truncate-end' }, model),
+    );
+  }
+  const inner = frameWidth - 4;
+  const pad = value => String(value).slice(0, inner).padEnd(inner, ' ');
   const location = String(cwd || '.');
-  const cwdShort = location.length > columns - 10
-    ? '…' + location.slice(-Math.max(5, columns - 12))
+  const cwdShort = location.length > inner - 5
+    ? '...' + location.slice(-Math.max(0, inner - 8))
     : location;
-  const sessionLabel = resumed ? uiText('resumed', 'reanudada') : uiText('new session', 'nueva sesión');
-  return h(Box, { flexDirection: 'column', paddingLeft: 2, paddingRight: 2 },
-    h(Box, { gap: 1 },
-      h(Text, { color: T.accent, bold: true }, '◇ Zyn'),
-      h(Text, { color: T.textGhost }, '·'),
-      h(Text, { color: T.textMuted }, sessionLabel),
-    ),
-    h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `${model}   ·   ${cwdShort}`),
+  const top = '┌' + '─'.repeat(frameWidth - 2) + '┐';
+  const bottom = '└' + '─'.repeat(frameWidth - 2) + '┘';
+  const row = value => `│ ${pad(value)} │`;
+  return h(Box, { flexDirection: 'column', paddingTop: 1, paddingLeft: 1 },
+    h(Text, { color: T.border }, top),
+    h(Text, { color: T.accent, bold: true }, row('> ' + APP_NAME)),
+    h(Text, { color: T.textMuted }, row(uiText('model: ', 'modelo: ') + model + ' · ' + sessionLabel)),
+    h(Text, { color: T.textMuted }, row('cwd: ' + cwdShort)),
+    h(Text, { color: T.border }, bottom),
   );
 }
 
@@ -463,31 +474,27 @@ function SpinnerLine({ label, started }) {
   );
 }
 
-function EventLine({ kind, title, detail }) {
+function EventLine({ kind, title, detail, width }) {
   const cfg = {
-    info:    { sym: '\u00b7', color: T.textGhost },
-    think:   { sym: '\u25d0', color: T.textGhost },
-    comment: { sym: '\u203a', color: T.accent },
-    tool:    { sym: '\u2933', color: T.purple },
-    ok:      { sym: '>', color: T.green },
-    warn:    { sym: '\u25b2', color: T.amber },
-    error:   { sym: 'x', color: T.red },
+    info: { sym: '·', color: T.textGhost },
+    think: { sym: '◐', color: T.textGhost },
+    comment: { sym: '›', color: T.accent },
+    tool: { sym: '↳', color: T.purple },
+    ok: { sym: '✓', color: T.green },
+    warn: { sym: '▲', color: T.amber },
+    error: { sym: '×', color: T.red },
   };
   const { sym, color } = cfg[kind] || cfg.info;
-
-  const cleanTitle = String(title || '').trim();
-  const detailLines = String(detail || '').split('\n').map(line => line.replace(/\t/g, '  ').replace(/\s+$/g, '')).filter(Boolean);
-  const titleColor = kind === 'tool' ? T.textDim : kind === 'comment' ? T.accent : T.textMuted;
-  const isBold = kind === 'comment';
-
-  return h(Box, { paddingLeft: 3, flexDirection: 'column' },
+  const content = formatEventPreview({ kind, title, detail }, width);
+  return h(Box, { paddingLeft: 2, paddingRight: 2, flexDirection: 'column' },
     h(Box, { gap: 1 },
-      h(Text, { color }, sym),
-      h(Text, { color: titleColor, bold: isBold, wrap: 'wrap' }, cleanTitle),
+      h(Text, { color, bold: true }, sym),
+      h(Text, { color: kind === 'error' ? T.red : T.textDim, bold: true, wrap: 'truncate-end' }, String(title || '').trim()),
     ),
-    detailLines.length
+    content.lines.length
       ? h(Box, { paddingLeft: 2, flexDirection: 'column' },
-          ...detailLines.map((line, idx) => h(Text, { key: String(idx), color: T.textGhost, wrap: 'wrap' }, line)),
+          ...content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'truncate-end' }, line)),
+          content.hint ? h(Text, { color: T.accentDim, wrap: 'truncate-end' }, content.hint) : null,
         )
       : null,
   );
@@ -740,21 +747,22 @@ function StatusBar({ store, model, providerKey, processing, width, turnCount }) 
     if (n < 100000) return `${(n / 1000).toFixed(1)}K`;
     return `${(n / 1000).toFixed(0)}K`;
   }
-  const tokenStr = tokenEstimate > 0
-    ? (contextLimit > 0
-        ? `${fmtK(tokenEstimate)}/${fmtK(contextLimit)}`
-        : fmtK(tokenEstimate))
+  const measured = store.lastMeasuredTokens || 0;
+  const currentTokens = measured || tokenEstimate;
+  const tokenStr = currentTokens > 0 || contextLimit > 0
+    ? `${measured ? '' : '~'}${fmtK(currentTokens)}/${contextLimit > 0 ? fmtK(contextLimit) : '?'}`
     : '';
+  const exactTokens = measured ? `measured:${fmtK(measured)}` : '';
   const tokenColor = contextLimit > 0 && tokenEstimate > contextLimit * 0.85
     ? T.amber
     : T.textInvis;
 
-  if (layout.compact) {
+  if (layout.compact || width < 78) {
     const shortModel = String(model).slice(0, Math.max(1, layout.columns - 17));
     return h(Box, { flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
       h(Text, { color: T.border }, line),
       h(Text, { color: T.textMuted, wrap: 'truncate-end' },
-        `> ${shortModel}${processing ? ' ...' : ''}  · /help`),
+        `> ${shortModel}${processing ? ' ...' : ''}${tokenStr ? ` · ${tokenStr}` : ''} · /help${width >= 48 ? ' · ' + uiText('esc exit', 'esc salir') : ''}`),
     );
   }
 
@@ -778,6 +786,7 @@ function StatusBar({ store, model, providerKey, processing, width, turnCount }) 
         tokenStr
           ? h(Text, { color: tokenColor }, tokenStr)
           : null,
+        exactTokens && width >= 95 ? h(Text, { color: T.cyan }, exactTokens) : null,
         h(Text, { color: T.textInvis }, '/help'),
         h(Text, { color: T.textInvis }, '\u00b7'),
         h(Text, { color: T.textInvis }, uiText('esc exit', 'esc salir')),
@@ -830,7 +839,7 @@ function StaticItem({ item, width }) {
     case 'user':     return h(UserMessage,   { text: item.text });
     case 'thinking': return h(ThinkingBlock, { text: item.text, elapsed: item.elapsed, width, expanded: item.expanded });
     case 'answer':   return h(AnswerBlock,   { text: item.text, width });
-    case 'event':    return h(EventLine,     { kind: item.kind, title: item.title, detail: item.detail });
+    case 'event':    return h(EventLine,     { kind: item.kind, title: item.title, detail: item.detail, width });
     case 'system':   return h(SystemMsg,     { text: item.text });
     case 'queued':   return h(QueuedMessage, { text: item.text });
     default:         return null;
@@ -1467,7 +1476,7 @@ function getUiBindings(store, state) {
       const limit = getContextLimit(state.activeModel);
       store.setTokenEstimate(estimate, limit);
     },
-    setTokenUsage: (usage) => store.setTokenUsage(usage),
+    setTokenUsage: (usage) => { state.lastTokenUsage = usage; store.setTokenUsage(usage); },
   };
 }
 
@@ -1475,6 +1484,9 @@ export async function startTUI(options = {}) {
   const { state, resumed, rehydrated } = await loadOrCreateSessionState(null, options);
   T = getTheme(state.theme || 'dark');
   const store = new UIStore(uiText);
+  store.currentModelKey = state.activeModel;
+  store.setTokenEstimate(estimateContextTokens(state), getContextLimit(state.activeModel));
+  if (state.lastTokenUsage) store.setTokenUsage(state.lastTokenUsage);
   globalStore = store;
   store.setShowThinking(state.settings?.showThinking);
 
@@ -1784,10 +1796,10 @@ export async function startTUI(options = {}) {
       };
 
       const SETTINGS_LIST = [
-        { key: 'maxToolSteps',         name: 'max-tool-steps',    isFloat: false, min: 1,      max: 500,     env: 'ZYN_MAX_TOOL_STEPS',         i18nKey: 'settingMaxToolSteps' },
+        { key: 'maxToolSteps',         name: 'max-tool-steps',    isFloat: false, min: 0,      max: 50000,     env: 'ZYN_MAX_TOOL_STEPS',         i18nKey: 'settingMaxToolSteps' },
         { key: 'requestTimeoutMs',     name: 'request-timeout',   isFloat: false, min: 5000,   max: 600000,  env: 'ZYN_REQUEST_TIMEOUT_MS',      i18nKey: 'settingRequestTimeout' },
-        { key: 'maxHistoryChars',      name: 'max-history',       isFloat: false, min: 10000,  max: 2000000, env: 'ZYN_MAX_HISTORY_CHARS',       i18nKey: 'settingMaxHistory' },
-        { key: 'maxOutputChars',       name: 'max-output',        isFloat: false, min: 1000,   max: 500000,  env: 'ZYN_MAX_OUTPUT_CHARS',        i18nKey: 'settingMaxOutput' },
+        { key: 'maxHistoryChars',      name: 'max-history',       isFloat: false, min: 0,  max: 200000000, env: 'ZYN_MAX_HISTORY_CHARS',       i18nKey: 'settingMaxHistory' },
+        { key: 'maxOutputChars',       name: 'max-output',        isFloat: false, min: 0,   max: 50000000,  env: 'ZYN_MAX_OUTPUT_CHARS',        i18nKey: 'settingMaxOutput' },
         { key: 'maxFileLines',         name: 'max-file-lines',    isFloat: false, min: 100,    max: 100000,  env: 'ZYN_MAX_FILE_LINES',          i18nKey: 'settingMaxFileLines' },
         { key: 'keepRecentMessages',   name: 'keep-recent',       isFloat: false, min: 5,      max: 500,     env: '',                            i18nKey: 'settingKeepRecent' },
         { key: 'autoCompactThreshold', name: 'compact-threshold', isFloat: true,  min: 0.1,    max: 1.0,     env: '',                            i18nKey: 'settingCompactThreshold' },
@@ -2003,6 +2015,14 @@ export async function startTUI(options = {}) {
         };
 
         const handled = await handleLocalCommand(input, state, deps);
+        if (handled) {
+          if (store.currentModelKey !== state.activeModel) {
+            store.currentModelKey = state.activeModel;
+            store.lastMeasuredTokens = null;
+            state.lastTokenUsage = null;
+          }
+          store.setTokenEstimate(estimateContextTokens(state), getContextLimit(state.activeModel));
+        }
         if (handled && lines.length > 0) {
           const clean = lines.filter(l => l.trim()).join('\n');
           if (clean) for (const item of splitSystemOutput(clean)) store.addItem(item);
