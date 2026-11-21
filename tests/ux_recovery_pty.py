@@ -79,13 +79,14 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(term.wait_exit(),0)
         finally:term.close()
 
-    def test_long_tool_output_preview_preserves_readability_on_phone(self):
+    def test_long_tool_output_scrolls_without_text_limits_on_phone(self):
         term=Terminal(cols=52,rows=20,command=['node','tests/tui_event_fixture.mjs'],env_extra={'CI':'','GITHUB_ACTIONS':''},wait_ready=False)
         try:
             term.read(0.7)
+            self.assertIn('abcdefghij',term.text)
+            term.send(b'\x1b[1;5H',0.3)
             self.assertIn('Completed Command free -h',term.text)
-            self.assertIn('/transcript',term.text)
-            self.assertNotIn('1234567890'*8,term.text)
+            self.assertNotIn('/transcript',term.text)
             self.assertNotIn(b'\x1b[2J',term.capture)
             term.send(b'\x03',0.3)
             self.assertEqual(term.wait_exit(),0)
