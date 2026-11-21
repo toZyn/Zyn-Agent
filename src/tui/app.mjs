@@ -7,6 +7,7 @@ import { selectViewportItems } from './viewport.mjs';
 import { confirmationViewport } from './confirmation-view.mjs';
 import { formatEventPreview } from './event-display.mjs';
 import { formatTerminalTable } from './table-layout.mjs';
+import { visibleStreamTail } from './stream-viewport.mjs';
 import { transcriptViewport } from './transcript-view.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
@@ -1416,7 +1417,11 @@ export function App({ store, state, onSubmit }) {
 
   if (store.liveThinking) {
     streamingArea.push(
-      h(ThinkingBlock, { key: 'thinking', text: store.liveThinking.text, live: true, width })
+      h(ThinkingBlock, {
+        key: 'thinking',
+        text: visibleStreamTail(store.liveThinking.text, Math.max(12, width - 12), Math.max(4, Math.floor((height - 6) / 2) - 3)),
+        live: true, width,
+      })
     );
   }
 
@@ -1424,7 +1429,11 @@ export function App({ store, state, onSubmit }) {
     const liveText = normalizeAssistantDisplayText(store.liveAnswer.text);
     if (liveText) {
       streamingArea.push(
-        h(AnswerBlock, { key: 'answer', text: liveText, live: true, width })
+        h(AnswerBlock, {
+          key: 'answer',
+          text: visibleStreamTail(liveText, Math.max(12, width - 14), Math.max(4, Math.floor((height - 6) / 2) - 3)),
+          live: true, width,
+        })
       );
     }
   }

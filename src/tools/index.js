@@ -1716,9 +1716,31 @@ async function executeToolCall(call, state, ui, options = {}) {
     throw err;
   }
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   const completionDesc = describeToolCall(call, state?.language);
-  ui.logEvent(state, 'ok', `Completado ${completionDesc}`, shortText(result, 100));
+  let displayDetail = shortText(result, 100);
+  if (['spawn_agent', 'wait_agent', 'followup_agent', 'resume_agent', 'interrupt_agent', 'close_agent'].includes(call.tool)) {
+    try {
+      const record = JSON.parse(result);
+      if (record?.agent_id) {
+        displayDetail = JSON.stringify({
+          agent_id: record.agent_id,
+          role: record.role || 'agent',
+          status: record.status || (record.closed ? 'closed' : 'started'),
+        });
+      }
+    } catch {}
+  } else if (['list_agents', 'list_agent_definitions', 'read_agent_messages'].includes(call.tool)) {
+    try {
+      const records = JSON.parse(result);
+      if (Array.isArray(records)) displayDetail = String(records.length) + ' entries';
+    } catch {}
+  } else if (call.tool === 'send_agent_message') {
+    try {
+      const record = JSON.parse(result);
+      displayDetail = record?.delivered ? 'Delivered · ' + String(record.recipient || '') : 'Message not delivered';
+    } catch {}
+  }
+  ui.logEvent(state, 'ok', t(state?.language, 'Completado', 'Completed') + ' ' + completionDesc, displayDetail);
   return result;
 }
 

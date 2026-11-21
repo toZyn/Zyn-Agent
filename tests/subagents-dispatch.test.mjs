@@ -90,3 +90,26 @@ test('worker messages are delivered through the registered tool dispatcher',asyn
     assert.deepEqual(coordinator.lookup(child.agent_id).state.getQueuedMessages(),['Message from parent: Please verify again']);
   }finally{closeCoordinators();}
 });
+
+
+test('agent lifecycle events emit parseable short status data rather than truncated JSON',async()=>{
+  const session={...parent,sessionId:'agent-status-event-test'};
+  const coordinator=getCoordinator(session);
+  coordinator.runTurn=async()=>({content:'done'});
+  const events=[];
+  const display={paint:x=>String(x),logEvent:(_,kind,title,detail)=>events.push({kind,title,detail})};
+  try{
+    const started=JSON.parse(await executeToolCall({tool:'spawn_agent',args:{task:'Inspect'}},session,display));
+    await executeToolCall({tool:'wait_agent',args:{agent_id:started.agent_id,timeout_ms:1000}},session,display);
+    const startEvent=events.find(x=>x.title.includes('spawn_agent'));
+    const waitEvent=events.find(x=>x.title.includes('wait_agent'));
+    for(const e of [startEvent,waitEvent]){
+      assert.ok(e);
+      const details=JSON.parse(e.detail);
+      assert.equal(details.agent_id,started.agent_id);
+      assert.equal(details.role,'explore');
+      assert.ok(['running','completed'].includes(details.status));
+      assert.equal(details.task,undefined);
+    }
+  }finally{closeCoordinators();}
+});

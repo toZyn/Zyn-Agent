@@ -1,4 +1,5 @@
 import { formatEventPreview } from './event-display.mjs';
+import { formatTerminalTable, displayWidth } from './table-layout.mjs';
 export const DEFAULT_VISIBLE_ITEMS = 400;
 
 export function appendVisibleItem(items, item, limit = DEFAULT_VISIBLE_ITEMS) {
@@ -10,7 +11,27 @@ export function appendVisibleItem(items, item, limit = DEFAULT_VISIBLE_ITEMS) {
 
 function estimateWrappedLines(text, columns) {
   const width = Math.max(8, columns - 10);
-  return String(text ?? '').split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(line.length / width)), 0);
+  const lines = String(text ?? '').split('\n');
+  let total = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const markdown = lines[i].includes('|') && i + 1 < lines.length &&
+      /^\s*\|?\s*:?-{3,}/.test(lines[i + 1]);
+    const unicode = lines[i].includes('│') && i + 1 < lines.length &&
+      lines[i + 1].includes('│');
+    if (markdown || unicode) {
+      const table = [lines[i]];
+      if (markdown) i++;
+      while (i + 1 < lines.length && lines[i + 1].trim() &&
+        (lines[i + 1].includes('|') || lines[i + 1].includes('│'))) {
+        table.push(lines[++i]);
+      }
+      const formatted = formatTerminalTable(table, Math.max(12, columns - 16));
+      total += formatted.lines.reduce((sum, line) => sum + Math.max(1, Math.ceil(displayWidth(line) / width)), 0);
+      continue;
+    }
+    total += Math.max(1, Math.ceil(displayWidth(lines[i]) / width));
+  }
+  return total;
 }
 
 function estimateItemRows(item, columns) {
@@ -19,7 +40,10 @@ function estimateItemRows(item, columns) {
     case 'divider': return 1;
     case 'event': {
       const view = formatEventPreview(item, columns);
-      return 1 + view.lines.length + (view.hint ? 1 : 0);
+      if (/\b(spawn_agent|wait_agent|followup_agent|resume_agent|close_agent|interrupt_agent)\b/.test(String(item.title || ''))) {
+        return 4 + view.lines.length;
+      }
+      return 1 + view.lines.length + (view.hint ? 1 : 0) + (item.kind === 'comment' ? 1 : 0);
     }
     case 'user': return 2 + estimateWrappedLines(item.text, columns);
     case 'answer': return 2 + estimateWrappedLines(item.text, columns);

@@ -46,3 +46,20 @@ test('viewport estimates the collapsed event height rather than the full raw too
  const visible=selectViewportItems(items,{columns:52,rows:12});
  assert.equal(visible.length,2);
 });
+
+
+test('agent event cards consume their real bordered height in viewport selection', () => {
+  const previous={id:1,type:'user',text:'Previous message'};
+  const status={id:2,type:'event',kind:'ok',title:'Completed wait_agent',detail:JSON.stringify({
+    agent_id:'b4f231bf-e618-47cd-a9b7-61415440db02',role:'general',status:'completed'
+  })};
+  const selected=selectViewportItems([previous,status],{columns:52,rows:5});
+  assert.deepEqual(selected.map(x=>x.id),[2]);
+});
+
+test('expanded vertical table counts its visible rows before selecting earlier events', () => {
+  const status={id:1,type:'event',kind:'ok',title:'Completed spawn_agent',detail:'{"agent_id":"example","role":"review","status":"running"}'};
+  const answer={id:2,type:'answer',text:'## Storage\nPartición │ Total │ Usado │ Disponible │ Uso\n/ │ 109 GB │ 30 GB │ 79 GB │ 28 %'};
+  const window=selectViewportItems([status,answer],{columns:48,rows:11});
+  assert.deepEqual(window.map(x=>x.id),[2]);
+});
