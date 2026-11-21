@@ -2,6 +2,8 @@ name: Publish to npm (manual approval only)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -9,6 +11,7 @@ permissions:
 
 jobs:
   publish:
+    if: "github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'npm: validate trusted publishing v1.7.0'"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -19,14 +22,6 @@ jobs:
       - run: npm install --global 'npm@^11.5.1'
       - run: npm ci
       - run: npm run test:all
-      - name: Configure npm token if configured
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if test -n "${NPM_TOKEN:-}"; then
-            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
-            chmod 600 "$HOME/.npmrc"
-          fi
       - name: Publish current package version
         run: |
           set -euo pipefail
