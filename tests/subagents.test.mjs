@@ -144,3 +144,20 @@ test('role definitions, validation, and UI bindings are well-formed', () => {
   assert.throws(() => manager.spawn(parent(), { task: '' }), /Task must/);
   assert.throws(() => manager.spawn(parent(), { task: 'x', role: 'made-up' }), /Unknown subagent role/);
 });
+
+
+test('general child cannot perform account or plugin actions without the parent', async () => {
+  let child;
+  const manager = new SubagentCoordinator({ runTurn: async (_, state) => {
+    child = state;
+    return { content: 'ready' };
+  } });
+  const job = manager.spawn(parent(), { task: 'Inspect code', role: 'general' });
+  await manager.wait(job.agent_id, 1000);
+  assert.doesNotThrow(() => assertToolAllowed({ tool: 'read_file', args: { path: 'README.md' } }, child));
+  assert.doesNotThrow(() => assertToolAllowed({ tool: 'write_file', args: { path: 'README.md' } }, child));
+  assert.throws(() => assertToolAllowed({ tool: 'gmail', args: { action: 'send' } }, child), /cannot invoke/);
+  assert.throws(() => assertToolAllowed({ tool: 'git', args: { action: 'api', method: 'POST' } }, child), /must be completed/);
+  assert.throws(() => assertToolAllowed({ tool: 'mcp_external_write', args: {} }, child), /cannot invoke/);
+  assert.throws(() => assertToolAllowed({ tool: 'fetch', args: { method: 'POST' } }, child), /must be completed/);
+});
