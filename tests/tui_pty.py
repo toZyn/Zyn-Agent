@@ -105,12 +105,15 @@ class TuiIntegrationTests(unittest.TestCase):
     def test_first_run_memory_import_wizard_and_new_session_snapshot(self):
         term = Terminal(env_extra={'ZYN_SKIP_ONBOARDING': '0'}, wait_ready=False)
         try:
-            self.assertIn('importar la memoria', term.text)
-            term.send(b's\n', 0.4)
-            self.assertIn('Export everything you know', term.text)
-            doc = b'```markdown\n## MEMORIES\n### Personal Context\n1. Peru\n## PREFERENCES\n### Tone\n1. Clear\n```\n:save\n'
+            self.assertIn('Import memory from another app', term.text)
+            term.send(b'y\n', 0.4)
+            self.assertIn('Paste', term.text)
+            self.assertIn('Copy', term.text)
+            self.assertNotIn(':save', term.text)
+            term.send(b'c\n', 0.2)
+            doc = b'```markdown\n## MEMORIES\n### Personal Context\n1. Peru\n\n## PREFERENCES\n### Tone\n1. Clear\n```\n\n'
             term.send(doc, 0.8)
-            self.assertIn('Memoria importada', term.text)
+            self.assertIn('Profile saved for future sessions', term.text)
             self.assertIn('## MEMORIES', (Path(term.tmp.name) / 'chat' / 'imported-memory.md').read_text())
             term.send(b'/exit\r', 0.35)
             self.assertEqual(term.wait_exit(), 0)
@@ -148,7 +151,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.term.send(b'\x1b', 0.3)
         self.term.send(b'/exit\r', 0.3)
         self.assertEqual(self.term.wait_exit(), 0)
-        self.assertTrue(any('┌' in line and len(line) <= 30 for line in self.term.text.splitlines()))
+        self.assertTrue(any(('┌' in line or '╭' in line) and len(line) <= 30 for line in self.term.text.splitlines()))
 
     def test_very_small_terminal_can_quit(self):
         self.term.resize(12, 12)

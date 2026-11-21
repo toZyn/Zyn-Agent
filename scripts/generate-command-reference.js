@@ -5,7 +5,7 @@ const groups = [
   ['Help and diagnostics', ['help', 'version', 'doctor', 'status', 'history', 'tools', 'context', 'stats', 'usage']],
   ['Sessions', ['session', 'sessions', 'new', 'resume', 'title', 'undo', 'redo', 'reset', 'clear', 'transcript', 'export', 'bg']],
   ['Models and connections', ['auth', 'login', 'logout', 'account', 'model', 'models', 'providers', 'provider', 'git', 'gmail']],
-  ['Workspace and execution', ['cwd', 'init', 'diff', 'plan', 'permissions', 'auto', 'stop', 'compact']],
+  ['Workspace and execution', ['cwd', 'init', 'diff', 'plan', 'permissions', 'auto', 'stop', 'compact', 'agents']],
   ['Skills and integrations', ['skills', 'plugins', 'mcp']],
   ['Personalization and interface', ['memory', 'persona', 'lang', 'config', 'settings', 'theme', 'thinking']],
   ['Exit', ['exit', 'quit']],

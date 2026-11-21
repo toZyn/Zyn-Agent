@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { appendVisibleItem } from './viewport.mjs';
+import { transcriptViewport } from './transcript-view.mjs';
 import { shortTextPreview } from './format.mjs';
 
 const require = createRequire(import.meta.url);
@@ -19,8 +20,10 @@ export class UIStore extends EventEmitter {
     this.spinner = null;
     this.processing = false;
     this.confirmRequest = null;
+    this.authFlow = null;
     this.selectRequest = null;
     this.inputRequest = null;
+    this.transcriptView = null;
     this.lastUserMessage = '';
     this.inputDraft = '';
     this.turnCount = 0;
@@ -33,6 +36,7 @@ export class UIStore extends EventEmitter {
     this.conversationRedo = [];
     this.thinkingHistory = [];
     this.tokenEstimate = 0;
+    this.lastMeasuredTokens = null;
     this.contextLimit = 0;
     this.themeVersion = 0;
     this._idCounter = 0;
@@ -64,8 +68,8 @@ export class UIStore extends EventEmitter {
   }
 
   scrollBy(delta) {
-    const step = Number.isFinite(delta) ? Math.trunc(delta) : (delta > 0 ? this.items.length : -this.items.length);
-    const next = Math.max(0, Math.min(this.items.length - 1, this.scrollOffset + step));
+    const step = Number.isFinite(delta) ? Math.trunc(delta) : (delta > 0 ? (this.scrollMax ?? this.items.length) : -(this.scrollMax ?? this.items.length));
+    const next = Math.max(0, Math.min((this.scrollMax ?? this.items.length - 1), this.scrollOffset + step));
     if (next !== this.scrollOffset) {
       this.scrollOffset = next;
       this._emit();
@@ -163,13 +167,29 @@ export class UIStore extends EventEmitter {
   }
 
   setTokenUsage(usage) {
-    if (usage && typeof usage.completionTokens === 'number' && usage.completionTokens > 0) {
-      this.tokenEstimate = (usage.promptTokens || 0) + (usage.completionTokens || 0);
+    const measured = Number(usage?.totalTokens || ((usage?.promptTokens || 0) + (usage?.completionTokens || 0)));
+    if (Number.isFinite(measured) && measured > 0) {
+      this.lastMeasuredTokens = measured;
       this._emit();
     }
   }
 
   addEvent(kind, title, detail) {
+    const operation = String(title || '').match(/\b(spawn_agent|wait_agent|followup_agent|resume_agent|interrupt_agent|close_agent)\b/);
+    if (kind === 'ok' && operation) {
+      const index = this.items.findLastIndex(item =>
+        item.type === 'event' &&
+        item.kind === 'tool' &&
+        String(item.title || '').includes(operation[1]),
+      );
+      if (index >= 0 && this.items.length - index <= 5) {
+        this.items = this.items.map((item, i) => i === index
+          ? { ...item, kind, title, detail: detail || '' }
+          : item);
+        this._emit();
+        return;
+      }
+    }
     this.addItem({ type: 'event', kind, title, detail: detail || '' });
   }
 
@@ -190,11 +210,52 @@ export class UIStore extends EventEmitter {
     this._emit();
   }
 
+  setAuthFlow(flow) {
+    this.authFlow = flow;
+    this._emit();
+  }
+
+  openTranscript(text) {
+    this.transcriptView = Array.isArray(text) && text.some(value => value && typeof value === 'object')
+      ? { entries: text, offset: 0 }
+      : { text: Array.isArray(text) ? text.join('\n') : String(text || ''), offset: 0 };
+    this._emit();
+  }
+
+  closeTranscript() {
+    if (!this.transcriptView) return;
+    this.transcriptView = null;
+    this._emit();
+  }
+
+  scrollTranscript(delta, width = 80, height = 24) {
+    if (!this.transcriptView) return;
+    const page = transcriptViewport(this.transcriptView, width, height);
+    const next = Math.max(0, Math.min(page.maxOffset, page.offset + delta));
+    if (next !== this.transcriptView.offset) {
+      this.transcriptView.offset = next;
+      this._emit();
+    }
+  }
+
   requestConfirm(title, detail) {
     return new Promise(resolve => {
-      this.confirmRequest = { title, detail, resolve };
+      this.confirmRequest = { title, detail, resolve, expanded: false, offset: 0 };
       this._emit();
     });
+  }
+
+  toggleConfirmDetails() {
+    if (!this.confirmRequest) return;
+    this.confirmRequest.expanded = !this.confirmRequest.expanded;
+    this.confirmRequest.offset = 0;
+    this._emit();
+  }
+
+  scrollConfirmDetails(delta) {
+    if (!this.confirmRequest || !this.confirmRequest.expanded) return;
+    this.confirmRequest.offset = Math.max(0, (this.confirmRequest.offset || 0) + delta);
+    this._emit();
   }
 
   resolveConfirm(answer) {

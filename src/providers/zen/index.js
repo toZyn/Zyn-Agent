@@ -251,7 +251,7 @@ async function refreshZenModels() {
           label,
           provider: 'zen',
           zenModel: m.id,
-          contextLength: Number(m.context_length || m.max_tokens || m.max_context_length || 0) || 128000,
+          contextLength: Number(m.context_length || m.max_context_length || 0) || undefined,
         };
       }
     }

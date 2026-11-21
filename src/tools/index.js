@@ -98,11 +98,40 @@ const TOOL_DEFINITIONS = [
   { name: 'load_skill', usage: '{ name, resource? }' },
   { name: 'memory', usage: '{ action, key?, value?, query? }' },
   { name: 'ask_user', usage: '{ question, options }' },
+  { name: 'spawn_agent', usage: '{ task, role?, definition?, fork? }' },
+  { name: 'wait_agent', usage: '{ agent_id, timeout_ms? }' },
+  { name: 'list_agents', usage: '{}' },
+  { name: 'followup_agent', usage: '{ agent_id, task }' },
+  { name: 'interrupt_agent', usage: '{ agent_id }' },
+  { name: 'close_agent', usage: '{ agent_id }' },
+  { name: 'resume_agent', usage: '{ agent_id }' },
+  { name: 'send_agent_message', usage: '{ agent_id, message }' },
+  { name: 'read_agent_messages', usage: '{}' },
+  { name: 'list_agent_definitions', usage: '{}' },
+  { name: 'save_agent_definition', usage: '{ name, role, instructions, description?, allowedTools? }' },
+  { name: 'remove_agent_definition', usage: '{ name }' },
 ];
 const REGISTERED_TOOLS = new Set(TOOL_DEFINITIONS.map(tool => tool.name));
 
 function getToolPromptText() {
   return [
+    '## Delegation and subagents',
+    'spawn_agent { task, role?, definition?, fork? } - Start an isolated worker; definition is a saved specialist name, or role is explore/review/plan/general.',
+    '  Roles: explore, review, plan (read-only); general (writes require the original user approval).',
+    '  Spawn only when user explicitly authorizes delegation or subagents. Avoid overlapping writable tasks.',
+    'wait_agent { agent_id, timeout_ms? } - Wait up to 60000 ms for completion, return status and summary.',
+    'list_agents {} - List current session child agents and statuses.',
+    'followup_agent { agent_id, task } - Continue an idle/completed child with its own context.',
+    'interrupt_agent { agent_id } - Cancel a running child.',
+    'close_agent { agent_id } - Release a child.',
+    'resume_agent { agent_id } - Recover an interrupted worker. Writable roles require explicit parent confirmation.',
+    'send_agent_message { agent_id, message } - Send a scoped message to parent or to another worker ID.',
+    'read_agent_messages {} - Retrieve messages sent to this agent from other agents.',
+    'list_agent_definitions {} - List persistent specialized agents.',
+    'save_agent_definition { name, role, instructions, description?, allowedTools? } - Save a reusable specialist, after user approval.',
+    'remove_agent_definition { name } - Remove a reusable specialist, after user approval.',
+
+    '',
     '## Lectura y navegacion',
     '',
     'list_dir { path? }',
@@ -726,14 +755,14 @@ async function runCommandTool(args, state, paint, ctx) {
 
   const allowed = await askConfirmation(
     state.rl,
-    'Ejecutar comando',
-    `${command}\n\nDirectorio: ${state.cwd}`,
+    t(state?.language, 'Ejecutar comando', 'Run command'),
+    `${t(state?.language, 'Comando', 'Command')}: ${command}\n${t(state?.language, 'Directorio', 'Directory')}: ${state.cwd}`,
     paint,
     state,
   );
 
   if (!allowed) {
-    return 'Comando cancelado por el usuario.';
+    return t(state?.language, 'Comando cancelado por el usuario.', 'Command denied by user.');
   }
 
 
@@ -745,10 +774,10 @@ async function runCommandTool(args, state, paint, ctx) {
     signal: ctx?.signal,
   });
 
-  const parts = [`Exit code: ${result.code ?? 'desconocido'}`];
+  const parts = [`Exit code: ${result.code ?? t(state?.language, 'desconocido', 'unknown')}`];
 
   if (result.timedOut) {
-    parts.push('Timeout: el comando fue detenido por tiempo.');
+    parts.push(t(state?.language, 'Tiempo agotado: se detuvo el comando.', 'Timeout: command terminated after exceeding its time limit.'));
   }
 
   if (result.stdout.trim()) {
@@ -1532,6 +1561,58 @@ async function executeToolCall(call, state, ui, options = {}) {
 
   try {
     switch (call.tool) {
+      case 'spawn_agent':
+      case 'wait_agent':
+      case 'list_agents':
+      case 'followup_agent':
+      case 'resume_agent':
+      case 'interrupt_agent':
+      case 'close_agent':
+      case 'send_agent_message':
+      case 'read_agent_messages':
+      case 'list_agent_definitions':
+      case 'save_agent_definition':
+      case 'remove_agent_definition': {
+        const { getCoordinator } = require('../core/subagents');
+        const { defineAgent, listDefinitions, removeDefinition } = require('../core/agent-definitions');
+        const coordinator = getCoordinator(state);
+        const args = call.args || {};
+        const sender = state.__subagent?.agentId || 'parent';
+        let data;
+        if (call.tool === 'spawn_agent') data = coordinator.spawn(state, args);
+        if (call.tool === 'wait_agent') {
+          const progress = await coordinator.wait(args.agent_id, args.timeout_ms);
+          const parentMessages = coordinator.readMessages('parent');
+          data = parentMessages.length ? { ...progress, messages: parentMessages } : progress;
+        }
+        if (call.tool === 'list_agents') data = coordinator.list();
+        if (call.tool === 'followup_agent') data = await coordinator.followup(args.agent_id, args.task);
+        if (call.tool === 'resume_agent') {
+          const agent = coordinator.lookup(args.agent_id);
+          if (agent.role === 'general') {
+            const approved = typeof state.tuiConfirm === 'function'
+              ? await state.tuiConfirm('Resume writable subagent?', 'This may retry previous actions. Review the child transcript before confirming.')
+              : false;
+            if (!approved) throw new Error('Resuming a writable subagent requires explicit user confirmation.');
+          }
+          data = coordinator.resume(args.agent_id);
+        }
+        if (call.tool === 'interrupt_agent') data = coordinator.interrupt(args.agent_id);
+        if (call.tool === 'close_agent') data = coordinator.close(args.agent_id);
+        if (call.tool === 'send_agent_message') data = coordinator.sendMessage(sender, args.agent_id || 'parent', args.message);
+        if (call.tool === 'read_agent_messages') data = coordinator.readMessages(sender);
+        if (call.tool === 'list_agent_definitions') data = listDefinitions();
+        if (call.tool === 'save_agent_definition' || call.tool === 'remove_agent_definition') {
+          if (state.__subagent) throw new Error('Only the parent session can manage definitions.');
+          const approved = typeof state.tuiConfirm === 'function'
+            ? await state.tuiConfirm(call.tool === 'save_agent_definition' ? 'Save agent definition?' : 'Delete saved agent definition?', String(args.name || ''))
+            : false;
+          if (!approved) throw new Error('User approval required for agent definitions.');
+          data = call.tool === 'save_agent_definition' ? defineAgent(args) : { name: args.name, removed: removeDefinition(args.name) };
+        }
+        result = JSON.stringify(data, null, 2);
+        break;
+      }
       case 'list_dir':
         result = await listDirTool(call.args, state, ctx);
         break;
@@ -1635,9 +1716,31 @@ async function executeToolCall(call, state, ui, options = {}) {
     throw err;
   }
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   const completionDesc = describeToolCall(call, state?.language);
-  ui.logEvent(state, 'ok', `Completado ${completionDesc}`, shortText(result, 100));
+  let displayDetail = shortText(result, 100);
+  if (['spawn_agent', 'wait_agent', 'followup_agent', 'resume_agent', 'interrupt_agent', 'close_agent'].includes(call.tool)) {
+    try {
+      const record = JSON.parse(result);
+      if (record?.agent_id) {
+        displayDetail = JSON.stringify({
+          agent_id: record.agent_id,
+          role: record.role || 'agent',
+          status: record.status || (record.closed ? 'closed' : 'started'),
+        });
+      }
+    } catch {}
+  } else if (['list_agents', 'list_agent_definitions', 'read_agent_messages'].includes(call.tool)) {
+    try {
+      const records = JSON.parse(result);
+      if (Array.isArray(records)) displayDetail = String(records.length) + ' entries';
+    } catch {}
+  } else if (call.tool === 'send_agent_message') {
+    try {
+      const record = JSON.parse(result);
+      displayDetail = record?.delivered ? 'Delivered · ' + String(record.recipient || '') : 'Message not delivered';
+    } catch {}
+  }
+  ui.logEvent(state, 'ok', t(state?.language, 'Completado', 'Completed') + ' ' + completionDesc, displayDetail);
   return result;
 }
 

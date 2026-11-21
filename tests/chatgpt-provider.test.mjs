@@ -53,5 +53,17 @@ test('sync catalogs are based on the account and never expose hidden models',asy
  const {MODELS}=require('../src/config');
  const result=await refreshChatGPTCatalog({getAccessToken:async()=> 'demo',fetcher:async()=>new Response(JSON.stringify({models:[{slug:'model-special',display_name:'Special model',visibility:'list'}]}),{status:200})});
  assert.equal(result.length,1);
+ assert.equal(MODELS['model-special'].modelId,'model-special');
  assert.equal(MODELS['chatgpt-model-special'].modelId,'model-special');
+ assert.equal(Object.keys(MODELS).includes('chatgpt-model-special'),false);
+});
+
+test('refresh removes stale hidden legacy aliases and registers updated account IDs',async()=>{
+ const {MODELS}=require('../src/config');
+ const network=async()=>new Response(JSON.stringify({models:[{slug:'new-account-model',display_name:'New Model',visibility:'list'}]}),{status:200});
+ await refreshChatGPTCatalog({getAccessToken:async()=> 'test',fetcher:network});
+ assert.equal(MODELS['model-special'],undefined);
+ assert.equal(MODELS['chatgpt-model-special'],undefined);
+ assert.equal(MODELS['new-account-model'].provider,'chatgpt');
+ assert.equal(Object.keys(MODELS).includes('chatgpt-new-account-model'),false);
 });

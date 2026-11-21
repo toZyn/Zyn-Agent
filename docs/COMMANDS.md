@@ -42,7 +42,7 @@ Most commands run within both the Ink TUI and the classic interactive terminal. 
 | `/auth` | connect ChatGPT plan, GitHub and Gmail |
 | `/login` | connect an account |
 | `/logout` | disconnect an account |
-| `/account` | ChatGPT account status |
+| `/account` | connected accounts and provider overview |
 | `/model` | choose or switch model |
 | `/models` | list models |
 | `/providers` | list/select providers |
@@ -62,6 +62,7 @@ Most commands run within both the Ink TUI and the classic interactive terminal. 
 | `/auto` | auto-approval |
 | `/stop` | stop agent |
 | `/compact` | compact memory |
+| `/agents` | list and manage subagents |
 
 ## Skills and integrations
 

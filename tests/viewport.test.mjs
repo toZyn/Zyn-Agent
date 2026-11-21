@@ -14,3 +14,10 @@ test('invalid configuration cannot grow UI history without bound', () => {
   assert.equal(appendVisibleItem([], { id: 1 }, Infinity).length, 1);
   assert.equal(appendVisibleItem([], { id: 1 }, -20).length, 1);
 });
+
+ test('default history preserves all messages', () => {
+ let items = [];
+ for (let i = 0; i < 700; i++) items = appendVisibleItem(items, { id: i });
+ assert.equal(items.length, 700);
+ assert.equal(items[0].id, 0);
+ });

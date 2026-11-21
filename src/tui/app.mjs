@@ -1,19 +1,24 @@
 import { splitSystemOutput } from './output.mjs';
+import { readTerminalDimensions } from './dimensions.mjs';
 import { UIStore } from './store.mjs';
 import { getTheme, SPIN_FRAMES } from './themes.mjs';
 import { stripAnsi, shortTextPreview, formatElapsed } from './format.mjs';
-import { selectViewportItems } from './viewport.mjs';
+import { confirmationViewport } from './confirmation-view.mjs';
+import { formatEventPreview } from './event-display.mjs';
+import { formatTerminalTable } from './table-layout.mjs';
+import { transcriptViewport } from './transcript-view.mjs';
 import { layoutForWidth } from './layout.mjs';
 import { runSerialInputs } from './turn-runner.mjs';
 import { normalizeInputEvent, splitSubmittedInput, editDelete, moveCursor, mouseWheelSteps } from './input-events.mjs';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, useInput, useApp, useStdout } from 'ink';
+import { render, renderToString, Box, Text, useInput, useApp, useStdout } from 'ink';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const { runAgentTurn } = require('../core/agent');
 const { parseAgentResponse } = require('../core/prompts');
 const { getProviderBrand } = require('../providers/brand');
+const { modelDisplayId } = require('../providers/model-id');
 const { handleLocalCommand, SLASH_COMMANDS } = require('../cli/commands');
 const { countTokens, estimateContextTokens, getContextLimit } = require('../config');
 const {
@@ -32,6 +37,7 @@ const {
 const { normalizeLanguage, t } = require('../i18n');
 
 const h = React.createElement;
+const rowCache = new WeakMap();
 function getTuiLang() {
   return normalizeLanguage(global.__zynCurrentLanguage || 'en');
 }
@@ -52,24 +58,28 @@ global.__zynApplyTheme = (name) => {
 };
 
 function useStore(store) {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const handler = () => setTick(t => t + 1);
     store.on('update', handler);
     return () => store.off('update', handler);
   }, [store]);
+  return tick;
 }
 
 function useDimensions() {
   const { stdout } = useStdout();
-  const [dims, setDims] = useState({ width: stdout?.columns || 100, height: stdout?.rows || 40 });
+  const [dims, setDims] = useState(() => readTerminalDimensions(stdout));
   useEffect(() => {
     if (!stdout) return;
-    const handler = () => {
-      setDims({ width: stdout.columns || 100, height: stdout.rows || 40 });
+    const refresh = () => {
+      const current = readTerminalDimensions(stdout);
+      setDims(previous => previous.width === current.width && previous.height === current.height ? previous : current);
     };
-    stdout.on('resize', handler);
-    return () => stdout.off('resize', handler);
+    stdout.on('resize', refresh);
+    const interval = setInterval(refresh, 750);
+    refresh();
+    return () => { stdout.off('resize', refresh); clearInterval(interval); };
   }, [stdout]);
   return dims;
 }
@@ -123,18 +133,15 @@ function makeOsc8Link(text, url) {
 }
 
 function InlineLine({ text, color }) {
-  const parts = parseInline(text);
   const base = color || T.text;
-  return h(Box, { flexWrap: 'wrap' },
-    ...parts.map((p, i) => {
-      if (p.t === 'bold') return h(Text, { key: String(i), color: base, bold: true }, p.v);
-      if (p.t === 'italic') return h(Text, { key: String(i), color: T.textMuted, italic: true }, p.v);
-      if (p.t === 'code') return h(Text, { key: String(i), color: T.cyan, backgroundColor: T.codeBg }, ' ' + p.v + ' ');
-      if (p.t === 'link') return h(Box, { key: String(i), flexWrap: 'wrap' },
-        h(Text, { color: T.accent, underline: true }, makeOsc8Link(p.text, p.url)),
-        h(Text, { color: T.textMuted }, ' (' + makeOsc8Link(p.url, p.url) + ')'),
-      );
-      return h(Text, { key: String(i), color: base }, p.v);
+  return h(Text, { color: base, wrap: 'wrap' },
+    ...parseInline(text).map((p, i) => {
+      const props = { key: String(i) };
+      if (p.t === 'bold') return h(Text, { ...props, bold: true }, p.v);
+      if (p.t === 'italic') return h(Text, { ...props, italic: true }, p.v);
+      if (p.t === 'code') return h(Text, { ...props, color: T.cyan }, p.v);
+      if (p.t === 'link') return h(Text, { ...props, color: T.accent, underline: true }, makeOsc8Link(p.text, p.url));
+      return h(Text, props, p.v);
     }),
   );
 }
@@ -201,12 +208,13 @@ function parseMarkdownBlocks(text) {
       continue;
     }
 
-    const tableCandidate = line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1]);
-    if (tableCandidate) {
+    const markdownTable = line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1]);
+    const unicodeTable = line.includes('│') && i + 1 < lines.length && lines[i + 1].includes('│');
+    if (markdownTable || unicodeTable) {
       flushParagraph();
       const table = [line];
-      i += 2;
-      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+      i += markdownTable ? 2 : 1;
+      while (i < lines.length && lines[i].trim() && (lines[i].includes('│') || lines[i].includes('|'))) {
         table.push(lines[i]);
         i += 1;
       }
@@ -318,8 +326,8 @@ function splitTableCells(row) {
 }
 
 function CodeBlock({ lang, code, width }) {
-  const maxW = Math.max(24, Math.min((width || 80) - 4, 120));
-  const inner = Math.max(10, maxW - 4);
+  const maxW = Math.max(4, (width || 80) - 4);
+  const inner = Math.max(1, maxW - 4);
   const langLabel = lang ? ' ' + lang + ' ' : '';
   const topBar = '┌' + (langLabel ? '─' + langLabel : '') + '─'.repeat(Math.max(0, maxW - 2 - langLabel.length)) + '┐';
   const botBar = '└' + '─'.repeat(maxW - 2) + '┘';
@@ -340,15 +348,7 @@ function CodeBlock({ lang, code, width }) {
 }
 
 function MarkdownContent({ text, width, live }) {
-  const contentWidth = Math.max(24, (width || 80) - 8);
-  if (live) {
-    const lines = text.split('\n');
-    return h(Box, { flexDirection: 'column' },
-      ...lines.map((line, i) =>
-        h(Text, { key: String(i), color: T.text, wrap: 'wrap' }, line || ' '),
-      ),
-    );
-  }
+  const contentWidth = Math.max(12, (width || 80) - 8);
   const blocks = parseMarkdownBlocks(text);
   return h(Box, { flexDirection: 'column' },
     ...blocks.map((block, i) => {
@@ -393,25 +393,14 @@ function MarkdownContent({ text, width, live }) {
         case 'hr':
           return h(Text, { key: String(i), color: T.borderLight }, '─'.repeat(Math.max(10, Math.min(width || 80, 70))));
         case 'table': {
-          const rows = block.rows.map(row => splitTableCells(row)).filter((row, idx) => idx === 0 || !row.every(cell => /^:?-{3,}:?$/.test(cell)));
-          const widths = [];
-          for (const row of rows) {
-            row.forEach((cell, idx) => {
-              widths[idx] = Math.max(widths[idx] || 0, cell.length);
-            });
-          }
-          const maxTableWidth = Math.max(24, (width || 80) - 8);
-          const gaps = Math.max(0, widths.length - 1) * 3;
-          const total = widths.reduce((a, b) => a + b, 0) + gaps;
-          const scale = total > maxTableWidth ? Math.max(0.4, (maxTableWidth - gaps) / Math.max(1, widths.reduce((a, b) => a + b, 0))) : 1;
-          const fitted = widths.map(w => Math.max(6, Math.floor(w * scale)));
-          const lines = rows.map(row => row.map((cell, idx) => {
-            const cellWidth = fitted[idx] || 6;
-            const value = String(cell || '').slice(0, cellWidth);
-            return value.padEnd(cellWidth);
-          }).join(' │ '));
-          return h(Box, { key: String(i), flexDirection: 'column' },
-            ...lines.map((line, rowIdx) => h(Text, { key: String(rowIdx), color: rowIdx === 0 ? T.accent : T.textMuted, wrap: 'wrap' }, line)),
+          const rendered = formatTerminalTable(block.rows, contentWidth);
+          return h(Box, { key: String(i), flexDirection: 'column', paddingLeft: 0 },
+            ...rendered.lines.map((line, rowIdx) => h(Text, {
+              key: String(rowIdx),
+              color: rowIdx === 0 ? T.accent : T.textMuted,
+              bold: rowIdx === 0 && rendered.mode === 'columns',
+              wrap: 'wrap',
+            }, line)),
           );
         }
         default:
@@ -471,33 +460,19 @@ function SpinnerLine({ label, started }) {
   );
 }
 
-function EventLine({ kind, title, detail }) {
+function EventLine({ kind, title, detail, width }) {
   const cfg = {
-    info:    { sym: '\u00b7', color: T.textGhost },
-    think:   { sym: '\u25d0', color: T.textGhost },
-    comment: { sym: '\u203a', color: T.accent },
-    tool:    { sym: '\u2933', color: T.purple },
-    ok:      { sym: '>', color: T.green },
-    warn:    { sym: '\u25b2', color: T.amber },
-    error:   { sym: 'x', color: T.red },
+    info: ['·', T.textGhost], think: ['◐', T.textGhost],
+    comment: ['›', T.accent], tool: ['↳', T.purple],
+    ok: ['>', T.green], warn: ['▲', T.amber], error: ['x', T.red],
   };
-  const { sym, color } = cfg[kind] || cfg.info;
-
-  const cleanTitle = String(title || '').trim();
-  const detailLines = String(detail || '').split('\n').map(line => line.replace(/\t/g, '  ').replace(/\s+$/g, '')).filter(Boolean);
-  const titleColor = kind === 'tool' ? T.textDim : kind === 'comment' ? T.accent : T.textMuted;
-  const isBold = kind === 'comment';
-
-  return h(Box, { paddingLeft: 3, flexDirection: 'column' },
-    h(Box, { gap: 1 },
-      h(Text, { color }, sym),
-      h(Text, { color: titleColor, bold: isBold, wrap: 'wrap' }, cleanTitle),
-    ),
-    detailLines.length
-      ? h(Box, { paddingLeft: 2, flexDirection: 'column' },
-          ...detailLines.map((line, idx) => h(Text, { key: String(idx), color: T.textGhost, wrap: 'wrap' }, line)),
-        )
-      : null,
+  const [sym, color] = cfg[kind] || cfg.info;
+  const content = formatEventPreview({ kind, title, detail }, width);
+  return h(Box, { paddingLeft: width < 48 ? 1 : 3, paddingRight: 1, flexDirection: 'column', flexShrink: 0 },
+    h(Text, { color, wrap: 'wrap' }, sym + ' ' + String(title || '').trim()),
+    content.lines.length ? h(Box, { paddingLeft: 2, flexDirection: 'column', flexShrink: 0 },
+      ...content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'wrap' }, line)),
+    ) : null,
   );
 }
 
@@ -587,7 +562,7 @@ function AnswerBlock({ text, live, width }) {
     const displayText = normalizeAssistantDisplayText(text);
     return { displayText };
   }, [text]);
-  const contentWidth = Math.max(40, (width || 80) - 8);
+  const contentWidth = Math.max(1, (width || 80) - 8);
   return h(Box, { flexDirection: 'column', paddingLeft: 3, paddingRight: 3, marginTop: 1 },
     h(Box, { gap: 1, marginBottom: 0 },
       h(Text, { color: T.accentSoft, bold: true }, '\u25c9'),
@@ -609,45 +584,68 @@ function SystemMsg({ text }) {
 }
 
 function QueuedMessage({ text }) {
-  return h(Box, { paddingLeft: 5, gap: 1, marginTop: 0 },
-    h(Text, { color: T.amber }, '\u{1F4E9}'),
-    h(Text, { color: T.textGhost, italic: true, wrap: 'wrap' }, text),
+  return h(Box, { paddingLeft: 4, marginTop: 1, marginBottom: 1, gap: 1 },
+    h(Text, { color: T.accent }, '↳'),
+    h(Text, { color: T.textGhost, italic: true, wrap: 'wrap' }, uiText('Queued', 'En espera') + ': ' + String(text || '').trim()),
   );
 }
 
-function ConfirmBar({ title, detail, lastMessage, draft }) {
-  const detailLines = (detail || '').split('\n').filter(l => l.trim()).slice(0, 10);
-  return h(Box, { flexDirection: 'column', paddingLeft: 2, paddingRight: 2, marginTop: 1, borderStyle: 'round', borderColor: T.borderLight },
-    h(Box, { paddingLeft: 1, gap: 1 },
-      h(Text, { color: T.amber, bold: true }, '\u26a0'),
-      h(Text, { color: T.text, bold: true }, title),
+function ConfirmBar({ request, width, height }) {
+  const view = confirmationViewport(request, width, height, global.__zynCurrentLanguage || 'en');
+  const maxWidth = Math.max(10, width - 5);
+  return h(Box, {
+    flexDirection: 'column', paddingLeft: 1, paddingRight: 1,
+    marginTop: 0, borderStyle: 'round', borderColor: T.amber,
+  },
+    h(Box, { gap: 1 },
+      h(Text, { color: T.amber, bold: true }, '◆'),
+      h(Text, { color: T.text, bold: true, wrap: 'truncate-end' }, view.title.slice(0, maxWidth)),
     ),
-    detailLines.length > 0
-      ? h(Box, { flexDirection: 'column', paddingLeft: 2, marginTop: 0 },
-          ...detailLines.map((line, i) =>
-            h(Text, { key: String(i), color: T.textDim, wrap: 'wrap' }, line),
-          ),
-        )
-      : null,
-    lastMessage
-      ? h(Box, { marginTop: 0, paddingLeft: 2 },
-          h(Text, { color: T.textGhost }, uiText('Your message: ', 'Tu mensaje: ')),
-          h(Text, { color: T.textDim, wrap: 'wrap' }, shortTextPreview(lastMessage, 80)),
-        )
-      : null,
-    draft
-      ? h(Box, { marginTop: 0, paddingLeft: 2 },
-          h(Text, { color: T.textGhost }, uiText('Saved draft: ', 'Borrador guardado: ')),
-          h(Text, { color: T.textDim, wrap: 'wrap' }, shortTextPreview(draft, 80)),
-        )
-      : null,
-    h(Box, { marginTop: 0, paddingLeft: 2, gap: 2 },
-      h(Text, { color: T.green, bold: true }, '[y]'),
-      h(Text, { color: T.textMuted }, uiText('allow', 'permitir')),
-      h(Text, { color: T.textInvis }, '\u00b7'),
-      h(Text, { color: T.red, bold: true }, '[n]'),
-      h(Text, { color: T.textMuted }, uiText('deny', 'denegar')),
+    h(Box, { flexDirection: 'column', paddingLeft: 1 },
+      ...view.lines.map((line, i) =>
+        h(Text, { key: String(i), color: T.textDim, wrap: 'truncate-end' }, line),
+      ),
+      view.hidden > 0
+        ? h(Text, { color: T.textGhost }, uiText(`… ${view.hidden} lines hidden`, `… ${view.hidden} líneas ocultas`))
+        : null,
     ),
+    h(Text, { color: T.textMuted, wrap: 'truncate-end' }, view.footer),
+  );
+}
+
+function TranscriptPanel({ view, width, height }) {
+  const page = transcriptViewport(view, width, height);
+  const paneHeight = Math.max(2, height - 4);
+  return h(Box, { flexDirection: 'column', height, paddingLeft: 2, paddingRight: 2 },
+    h(Text, { color: T.accent, bold: true }, uiText('Transcript · recent activity', 'Transcripción · actividad reciente')),
+    h(Text, { color: T.textGhost }, `${page.start + 1}-${page.end} / ${page.total}`),
+    h(Box, { flexDirection: 'column', height: paneHeight, overflowY: 'hidden' },
+      ...page.lines.map((line, index) => h(Text, {
+        key: String(page.start + index), color: T.textDim, wrap: 'truncate-end',
+      }, line || ' ')),
+    ),
+    h(Text, { color: T.accentDim, wrap: 'truncate-end' },
+      width < 52
+        ? uiText('↑↓ scroll · Esc close', '↑↓ mover · Esc cerrar')
+        : uiText('↑↓ scroll · PgUp/PgDn · Esc close · /export for full file', '↑↓ mover · RePág/AvPág · Esc cerrar · /export para archivo completo')),
+  );
+}
+
+function AuthCard({ width, flow }) {
+  if (!flow) return null;
+  const compact = width < 48;
+  return h(Box, {
+    flexDirection: 'column', paddingLeft: 1, paddingRight: 1,
+    borderStyle: 'round', borderColor: T.accent,
+  },
+    h(Box, { gap: 1 },
+      h(Text, { color: T.accent, bold: true }, '◇'),
+      h(Text, { color: T.text, bold: true }, uiText('Connect ChatGPT', 'Conectar ChatGPT')),
+    ),
+    h(Text, { color: T.textMuted, wrap: 'truncate-end' }, uiText('Complete authorization in your browser.', 'Autoriza el acceso desde el navegador.')),
+    h(Text, { color: T.textDim, wrap: 'truncate-end' }, compact
+      ? uiText('C copy · O open · Esc cancel', 'C copiar · O abrir · Esc cancelar')
+      : uiText('C copy URL · O open browser · L show URL · Esc cancel', 'C copiar URL · O abrir navegador · L ver URL · Esc cancelar')),
   );
 }
 
@@ -743,21 +741,22 @@ function StatusBar({ store, model, providerKey, processing, width, turnCount }) 
     if (n < 100000) return `${(n / 1000).toFixed(1)}K`;
     return `${(n / 1000).toFixed(0)}K`;
   }
-  const tokenStr = tokenEstimate > 0
-    ? (contextLimit > 0
-        ? `${fmtK(tokenEstimate)}/${fmtK(contextLimit)}`
-        : fmtK(tokenEstimate))
+  const measured = store.lastMeasuredTokens || 0;
+  const currentTokens = measured || tokenEstimate;
+  const tokenStr = currentTokens > 0 || contextLimit > 0
+    ? `${measured ? '' : '~'}${fmtK(currentTokens)}/${contextLimit > 0 ? fmtK(contextLimit) : '?'}`
     : '';
+  const exactTokens = measured ? `measured:${fmtK(measured)}` : '';
   const tokenColor = contextLimit > 0 && tokenEstimate > contextLimit * 0.85
     ? T.amber
     : T.textInvis;
 
-  if (layout.compact) {
+  if (layout.compact || width < 78) {
     const shortModel = String(model).slice(0, Math.max(1, layout.columns - 17));
     return h(Box, { flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
       h(Text, { color: T.border }, line),
       h(Text, { color: T.textMuted, wrap: 'truncate-end' },
-        `> ${shortModel}${processing ? ' ...' : ''}  · /help`),
+        `> ${shortModel}${processing ? ' ...' : ''}${tokenStr ? ` · ${tokenStr}` : ''} · /help${width >= 48 ? ' · ' + uiText('esc exit', 'esc salir') : ''}`),
     );
   }
 
@@ -781,6 +780,7 @@ function StatusBar({ store, model, providerKey, processing, width, turnCount }) 
         tokenStr
           ? h(Text, { color: tokenColor }, tokenStr)
           : null,
+        exactTokens && width >= 95 ? h(Text, { color: T.cyan }, exactTokens) : null,
         h(Text, { color: T.textInvis }, '/help'),
         h(Text, { color: T.textInvis }, '\u00b7'),
         h(Text, { color: T.textInvis }, uiText('esc exit', 'esc salir')),
@@ -833,7 +833,7 @@ function StaticItem({ item, width }) {
     case 'user':     return h(UserMessage,   { text: item.text });
     case 'thinking': return h(ThinkingBlock, { text: item.text, elapsed: item.elapsed, width, expanded: item.expanded });
     case 'answer':   return h(AnswerBlock,   { text: item.text, width });
-    case 'event':    return h(EventLine,     { kind: item.kind, title: item.title, detail: item.detail });
+    case 'event':    return h(EventLine,     { kind: item.kind, title: item.title, detail: item.detail, width });
     case 'system':   return h(SystemMsg,     { text: item.text });
     case 'queued':   return h(QueuedMessage, { text: item.text });
     default:         return null;
@@ -1155,7 +1155,8 @@ function InputBar({ onSubmit, processing, width = 100, height = 24, draft = '', 
 }
 
 export function App({ store, state, onSubmit }) {
-  useStore(store);
+  const storeVersion = useStore(store);
+  const [rendered, setRendered] = useState(null);
   global.__zynCurrentLanguage = state?.language || 'en';
   const { exit } = useApp();
   const { width, height } = useDimensions();
@@ -1165,7 +1166,10 @@ export function App({ store, state, onSubmit }) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
     const onMouse = chunk => {
       const steps = mouseWheelSteps(chunk);
-      if (steps) store.scrollBy(steps * 3);
+      if (steps) {
+        if (store.transcriptView) store.scrollTranscript(steps * 3, width, height - 3);
+        else store.scrollBy(steps * 3);
+      }
     };
     process.stdin.on('data', onMouse);
     process.stdout.write('\x1b[?1000h\x1b[?1006h');
@@ -1173,10 +1177,10 @@ export function App({ store, state, onSubmit }) {
       process.stdin.off('data', onMouse);
       process.stdout.write('\x1b[?1000l\x1b[?1006l');
     };
-  }, [store]);
+  }, [store, width, height]);
 
   const modelKey   = state?.activeModel || DEFAULT_MODEL_KEY;
-  const modelLabel = (MODELS[modelKey]?.label || modelKey).toLowerCase();
+  const modelLabel = modelDisplayId(modelKey, MODELS[modelKey]);
 
   const handleInput = useCallback((text, meta) => {
     if (text === '/exit' || text === '/quit') {
@@ -1194,11 +1198,23 @@ export function App({ store, state, onSubmit }) {
   useInput((input, key) => {
     if (/(?:\x1b)?\[<\d+;\d+;\d+[Mm]/.test(input)) return;
     if (key.ctrl && input === 'c') {
+      if (store.authFlow) { store.authFlow.cancel(); store.setAuthFlow(null); }
       try {
         const { saveState } = require('../utils/sessionStorage');
         if (typeof saveState === 'function') saveState(state);
       } catch {}
       exit();
+      return;
+    }
+    if (store.transcriptView) {
+      if (key.escape || input === 'q') { store.closeTranscript(); return; }
+      const rows = Math.max(2, height - 7);
+      if (key.upArrow || input === 'k') store.scrollTranscript(1, width, height - 3);
+      else if (key.downArrow || input === 'j') store.scrollTranscript(-1, width, height - 3);
+      else if (key.pageUp) store.scrollTranscript(rows, width, height - 3);
+      else if (key.pageDown) store.scrollTranscript(-rows, width, height - 3);
+      else if (key.home) store.scrollTranscript(1000000, width, height - 3);
+      else if (key.end) store.scrollTranscript(-1000000, width, height - 3);
       return;
     }
     if (key.ctrl && input === 't') {
@@ -1214,6 +1230,11 @@ export function App({ store, state, onSubmit }) {
       return;
     }
     if (key.escape) {
+      if (store.authFlow) {
+        store.authFlow.cancel();
+        store.setAuthFlow(null);
+        return;
+      }
       if (store.selectRequest) {
         store.cancelSelect();
         return;
@@ -1250,7 +1271,38 @@ export function App({ store, state, onSubmit }) {
       store.addEvent('info', uiText('press ESC again', 'pulsa ESC otra vez'), uiText('to exit', 'para salir'));
       return;
     }
+    if (store.authFlow) {
+      const keyValue = String(input || '').toLowerCase();
+      if (keyValue === 'c') {
+        const result = require('../core/clipboard').copyToClipboard(store.authFlow.url, { output: process.stdout });
+        store.addEvent(result.verified ? 'ok' : 'info',
+          result.verified ? uiText('Login link copied', 'Enlace de acceso copiado') : uiText('Copy requested', 'Copia solicitada'),
+          result.verified ? '' : uiText('Terminal clipboard support varies (OSC52).', 'El soporte del portapapeles depende del terminal (OSC52).'));
+        return;
+      }
+      if (keyValue === 'o') {
+        require('../auth/browser').openChatGPTAuthBrowser(store.authFlow.url);
+        store.addEvent('info', uiText('Opening browser', 'Abriendo navegador'), '');
+        return;
+      }
+      if (keyValue === 'l') {
+        store.addItem({ type: 'system', text: store.authFlow.url });
+        return;
+      }
+      return;
+    }
     if (store.selectRequest) {
+      const quickNumber = String(input || '').match(/^([1-9])(?:\r|\n)?$/);
+      if (quickNumber) {
+        const index = Number(quickNumber[1]) - 1;
+        const selection = store.selectRequest;
+        if (index < selection.items.length) {
+          const item = selection.items[index];
+          const value = selection.getValue ? selection.getValue(item, index) : item;
+          store.resolveSelect(value);
+          return;
+        }
+      }
       if (key.upArrow || input === '\x1b[A' || input === '\x1bOA' || input === '\x1b[[A') { store.adjustSelect(-1); return; }
       if (key.downArrow || input === '\x1b[B' || input === '\x1bOB' || input === '\x1b[[B') { store.adjustSelect(1); return; }
       if (key.return || input === '\r' || input === '\n') {
@@ -1293,26 +1345,26 @@ export function App({ store, state, onSubmit }) {
       return;
     }
     if (!store.confirmRequest) {
-      const visible = selectViewportItems(store.items, {
-        columns: width,
-        rows: Math.max(1, height - 8),
-        offset: store.scrollOffset,
-      });
-      const page = Math.max(1, visible.length - 1);
+      const page = Math.max(1, height - 8);
       if (key.pageUp || (key.ctrl && key.upArrow)) { store.scrollBy(page); return; }
       if (key.pageDown || (key.ctrl && key.downArrow)) { store.scrollBy(-page); return; }
       if (key.ctrl && key.home) { store.scrollBy(Infinity); return; }
       if (key.ctrl && key.end) { store.scrollToBottom(); return; }
       return;
     }
-    if (input === 'y' || input === 's') store.resolveConfirm(true);
-    else if (input === 'n' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
+    if (input.toLowerCase() === 'v') { store.toggleConfirmDetails(); return; }
+    if (key.upArrow || input === '\x1b[A') { store.scrollConfirmDetails(-1); return; }
+    if (key.downArrow || input === '\x1b[B') { store.scrollConfirmDetails(1); return; }
+    const decision = String(input || '').trim().toLowerCase();
+    if (decision === 'y' || decision === 's' || decision === '1') store.resolveConfirm(true);
+    else if (decision === 'n' || decision === '2' || key.return || input === '\r' || input === '\n') store.resolveConfirm(false);
   });
 
-  const showInput   = !store.confirmRequest && !store.selectRequest && !store.inputRequest;
+  const showInput   = !store.confirmRequest && !store.selectRequest && !store.inputRequest && !store.authFlow;
   const showConfirm = !!store.confirmRequest;
   const showSelect  = !!store.selectRequest;
   const showPrompt  = !!store.inputRequest;
+  const showAuth = !!store.authFlow;
 
   const streamingArea = [];
   const controlArea = [];
@@ -1325,7 +1377,11 @@ export function App({ store, state, onSubmit }) {
 
   if (store.liveThinking) {
     streamingArea.push(
-      h(ThinkingBlock, { key: 'thinking', text: store.liveThinking.text, live: true, width })
+      h(ThinkingBlock, {
+        key: 'thinking',
+        text: store.liveThinking.text,
+        live: true, width,
+      })
     );
   }
 
@@ -1333,14 +1389,22 @@ export function App({ store, state, onSubmit }) {
     const liveText = normalizeAssistantDisplayText(store.liveAnswer.text);
     if (liveText) {
       streamingArea.push(
-        h(AnswerBlock, { key: 'answer', text: liveText, live: true, width })
+        h(AnswerBlock, {
+          key: 'answer',
+          text: liveText,
+          live: true, width,
+        })
       );
     }
   }
 
+  if (showAuth) {
+    controlArea.push(h(AuthCard, { key: 'auth', width, flow: store.authFlow }));
+  }
+
   if (showConfirm) {
     controlArea.push(
-      h(ConfirmBar, { key: 'confirm', title: store.confirmRequest.title, detail: store.confirmRequest.detail, lastMessage: store.lastUserMessage, draft: store.inputDraft })
+      h(ConfirmBar, { key: 'confirm', request: store.confirmRequest, width, height })
     );
   }
 
@@ -1362,34 +1426,56 @@ export function App({ store, state, onSubmit }) {
     );
   }
 
-  const streamingRows = store.liveAnswer || store.liveThinking
-    ? Math.max(2, Math.floor((height - 6) / 2))
-    : store.spinner ? 2 : 0;
   const modalRows = showSelect
     ? Math.max(7, Math.min(20, Math.floor(width / 5), height - 12) + 5)
-    : showPrompt ? 6 : showConfirm ? 5 : 0;
+    : showPrompt ? 6 : showConfirm ? Math.min(height - 4, store.confirmRequest?.expanded ? 12 : 8) : showAuth ? 5 : 0;
   const inputRows = showInput ? (store.inputDraft.startsWith('/') ? Math.min(10, Math.max(2, height - 5)) : 2) : modalRows;
-  const historyRows = Math.max(1, height - inputRows - streamingRows - 4);
-  const historyWindow = selectViewportItems(store.items, { columns: width, rows: historyRows - (store.scrollOffset > 0 ? 1 : 0), offset: store.scrollOffset });
+  const historyRows = Math.max(1, height - inputRows - 4);
+  useEffect(() => {
+    const task = setImmediate(() => {
+      const lines = [];
+      const renderRows = element => renderToString(h(Box, { width, flexDirection: 'column', flexShrink: 0 }, element), { columns: width }).split('\n');
+      if (streamingArea.length) lines.push(...renderRows(streamingArea));
+      let index = store.items.length - 1;
+      const needed = historyRows + store.scrollOffset;
+      while (index >= 0 && lines.length < needed) {
+        const item = store.items[index--];
+        let cached = rowCache.get(item);
+        if (!cached || cached.width !== width || cached.theme !== T) {
+          cached = { width, theme: T, lines: renderRows(h(StaticItem, { item, width })) };
+          rowCache.set(item, cached);
+        }
+        lines.unshift(...cached.lines);
+      }
+      store.scrollMax = index < 0 ? Math.max(0, lines.length - historyRows) : Number.MAX_SAFE_INTEGER;
+      store.scrollOffset = Math.min(store.scrollOffset, store.scrollMax);
+      setRendered(lines);
+    });
+    return () => clearImmediate(task);
+  }, [storeVersion, width, height, store]);
+  if (store.transcriptView) {
+    return h(Box, { flexDirection: 'column', height: '100%', width: '100%' },
+      h(TranscriptPanel, { view: store.transcriptView, width, height: Math.max(7, height - 3) }),
+      h(StatusBar, { store, model: modelLabel, providerKey: MODELS[state.activeModel]?.provider || 'unknown', processing: false, width, turnCount: store.turnCount }),
+    );
+  }
 
-  return h(Box, { flexDirection: 'column', width: '100%', height: '100%' },
-    h(Box, { flexDirection: 'column', height: historyRows, overflowY: 'hidden', flexShrink: 1 },
-      store.scrollOffset > 0
-        ? h(Text, { color: T.textGhost, wrap: 'truncate-end' }, `  ${uiText('Older messages', 'Mensajes anteriores')} · PgDn ${uiText('to return', 'para volver')}`)
-        : null,
-      historyWindow.map(item =>
-        h(Box, { key: item.id, flexDirection: 'column' },
-          h(StaticItem, { item, width }),
-        ),
-      ),
+  if (rendered === null) return h(Text, { color: T.accent }, '> ' + APP_NAME);
+  const offset = Math.min(store.scrollOffset, Math.max(0, rendered.length - historyRows));
+  const end = rendered.length - offset;
+  const visibleRows = rendered.slice(Math.max(0, end - historyRows + (offset > 0 ? 1 : 0)), end);
+
+  return h(Box, { flexDirection: 'column', width: '100%' },
+    h(Box, { flexDirection: 'column', flexShrink: 0 },
+      offset > 0 ? h(Text, { color: T.textGhost }, '  ' + uiText('Older messages · PgDn to return', 'Mensajes anteriores · PgDn para volver')) : null,
+      ...visibleRows.map((line, i) => h(Text, { key: String(i), wrap: 'truncate-end' }, line || ' ')),
     ),
-    streamingRows > 0 ? h(Box, { flexDirection: 'column', height: streamingRows, overflowY: 'hidden', flexShrink: 1 }, ...streamingArea) : null,
     ...controlArea,
     h(StatusBar, {
       store,
       model: modelLabel,
       providerKey: MODELS[state.activeModel]?.provider || 'unknown',
-      processing: store.processing,
+      processing: store.processing && !showSelect && !showConfirm && !showPrompt && !showAuth,
       width,
       turnCount: store.turnCount,
     }),
@@ -1424,7 +1510,7 @@ function getUiBindings(store, state) {
       const limit = getContextLimit(state.activeModel);
       store.setTokenEstimate(estimate, limit);
     },
-    setTokenUsage: (usage) => store.setTokenUsage(usage),
+    setTokenUsage: (usage) => { state.lastTokenUsage = usage; store.setTokenUsage(usage); },
   };
 }
 
@@ -1432,6 +1518,9 @@ export async function startTUI(options = {}) {
   const { state, resumed, rehydrated } = await loadOrCreateSessionState(null, options);
   T = getTheme(state.theme || 'dark');
   const store = new UIStore(uiText);
+  store.currentModelKey = state.activeModel;
+  store.setTokenEstimate(estimateContextTokens(state), getContextLimit(state.activeModel));
+  if (state.lastTokenUsage) store.setTokenUsage(state.lastTokenUsage);
   globalStore = store;
   store.setShowThinking(state.settings?.showThinking);
 
@@ -1474,26 +1563,31 @@ export async function startTUI(options = {}) {
       }
     } catch {}
   };
-  const mcpCleanup = () => { try { require('../mcp/client').stopAllStdioServers(); } catch {} };
+  const mcpCleanup = () => {
+    try { require('../core/subagents').closeCoordinators(); } catch {}
+    try { require('../mcp/client').stopAllStdioServers(); } catch {}
+  };
   process.on('SIGINT', () => { mcpCleanup(); saveStateSafe(); process.exit(0); });
   process.on('SIGTERM', () => { mcpCleanup(); saveStateSafe(); process.exit(0); });
   process.on('exit', () => { mcpCleanup(); saveStateSafe(); });
 
   state.rl = null;
-  state.tuiConfirm = (title, detail) => store.requestSelect({
-    title,
-    subtitle: detail || '',
-    items: [
-      { key: true, label: uiText('Yes', 'Sí') },
-      { key: false, label: uiText('No', 'No') },
-    ],
-    initialIndex: 1,
-    getLabel: (item) => item.label,
-    getValue: (item) => item.key,
-  });
+  state.tuiConfirm = (title, detail) => store.requestConfirm(title, detail || '');
   state.tuiSelect = (options) => store.requestSelect(options);
   state.tuiInput = (options) => store.requestInput(options);
   state.tuiAskUser = (question, allItems, customLabel) => store.requestAskUser(question, allItems, customLabel);
+
+  try {
+    const restoredAgents = require('../core/subagents').getCoordinator(state).list();
+    if (restoredAgents.length) {
+      const active = restoredAgents.filter(a => a.status === 'running').length;
+      store.addEvent('info', active
+        ? uiText('Recovered agent sessions · ' + active + ' resuming', 'Sesiones de agentes recuperadas · ' + active + ' reanudando')
+        : uiText('Recovered ' + restoredAgents.length + ' agent sessions', 'Recuperadas ' + restoredAgents.length + ' sesiones de agentes'));
+    }
+  } catch (error) {
+    store.addEvent('warn', uiText('Agent recovery unavailable', 'Recuperación de agentes no disponible'), String(error.message || error));
+  }
 
   try {
     const fs = require('fs');
@@ -1543,7 +1637,7 @@ export async function startTUI(options = {}) {
   };
 
   const modelKey   = state.activeModel || DEFAULT_MODEL_KEY;
-  const modelLabel = (MODELS[modelKey]?.label || modelKey).toLowerCase();
+  const modelLabel = modelDisplayId(modelKey, MODELS[modelKey]);
   const cwd = state.cwd || process.cwd();
 
   store.addItem({ type: 'banner', model: modelLabel, resumed, cwd });
@@ -1652,9 +1746,60 @@ export async function startTUI(options = {}) {
   }
 
   const processInput = async (input) => {
+    if (input === '/transcript') {
+      const { readTranscriptEntries } = require('../utils/transcriptStorage');
+      const entries = await readTranscriptEntries(state.sessionId);
+      store.openTranscript(entries.slice(-50));
+      return;
+    }
     if (input === '/exit' || input === '/quit') {
       store.pendingExit = true;
       store.addEvent('info', uiText('bye', 'hasta luego'));
+      return;
+    }
+
+    if (input === '/auth chatgpt login' || input === '/login chatgpt') {
+      if (store.authFlow) {
+        store.addEvent('info', uiText('Authorization already in progress', 'La autorización ya está en curso'));
+        return;
+      }
+      const { startChatGPTLogin, getChatGPTStatus } = require('../auth/chatgpt');
+      const { openChatGPTAuthBrowser } = require('../auth/browser');
+      const { refreshChatGPTCatalog } = require('../providers/chatgpt');
+      const { resolveAccountModelKey } = require('../providers/model-id');
+      try {
+        const previous = await getChatGPTStatus();
+        const flow = await startChatGPTLogin({ reconnect: previous.connected });
+        store.setAuthFlow(flow);
+        openChatGPTAuthBrowser(flow.url);
+        flow.done.then(async account => {
+          store.setAuthFlow(null);
+          if (!account.sharing) {
+            store.addEvent('warn', uiText('Connected without model authorization', 'Conectado sin autorización de modelos'));
+            return;
+          }
+          const models = await refreshChatGPTCatalog();
+          store.addEvent('ok', uiText('ChatGPT connected', 'ChatGPT conectado'), uiText(`${models.length} models available`, `${models.length} modelos disponibles`));
+          if (models.length) {
+            const selected = await store.requestSelect({
+              title: uiText('Choose ChatGPT model', 'Elegir modelo ChatGPT'),
+              items: models,
+              getLabel: model => `${model.slug}  ·  ${model.label}`,
+              getValue: model => model.slug,
+            });
+            if (selected) {
+              state.activeModel = resolveAccountModelKey(selected, MODELS);
+              await require('../utils/sessionStorage').saveState(state);
+              store.addEvent('ok', uiText('Active model', 'Modelo activo'), selected);
+            }
+          }
+        }).catch(error => {
+          store.setAuthFlow(null);
+          if (!/cancel/i.test(error.message || '')) store.addEvent('error', uiText('Authentication failed', 'Falló la autenticación'), error.message);
+        });
+      } catch (error) {
+        store.addEvent('error', uiText('Could not start authentication', 'No se pudo iniciar la autenticación'), error.message);
+      }
       return;
     }
 
@@ -1706,10 +1851,10 @@ export async function startTUI(options = {}) {
       };
 
       const SETTINGS_LIST = [
-        { key: 'maxToolSteps',         name: 'max-tool-steps',    isFloat: false, min: 1,      max: 500,     env: 'ZYN_MAX_TOOL_STEPS',         i18nKey: 'settingMaxToolSteps' },
+        { key: 'maxToolSteps',         name: 'max-tool-steps',    isFloat: false, min: 0,      max: 50000,     env: 'ZYN_MAX_TOOL_STEPS',         i18nKey: 'settingMaxToolSteps' },
         { key: 'requestTimeoutMs',     name: 'request-timeout',   isFloat: false, min: 5000,   max: 600000,  env: 'ZYN_REQUEST_TIMEOUT_MS',      i18nKey: 'settingRequestTimeout' },
-        { key: 'maxHistoryChars',      name: 'max-history',       isFloat: false, min: 10000,  max: 2000000, env: 'ZYN_MAX_HISTORY_CHARS',       i18nKey: 'settingMaxHistory' },
-        { key: 'maxOutputChars',       name: 'max-output',        isFloat: false, min: 1000,   max: 500000,  env: 'ZYN_MAX_OUTPUT_CHARS',        i18nKey: 'settingMaxOutput' },
+        { key: 'maxHistoryChars',      name: 'max-history',       isFloat: false, min: 0,  max: 200000000, env: 'ZYN_MAX_HISTORY_CHARS',       i18nKey: 'settingMaxHistory' },
+        { key: 'maxOutputChars',       name: 'max-output',        isFloat: false, min: 0,   max: 50000000,  env: 'ZYN_MAX_OUTPUT_CHARS',        i18nKey: 'settingMaxOutput' },
         { key: 'maxFileLines',         name: 'max-file-lines',    isFloat: false, min: 100,    max: 100000,  env: 'ZYN_MAX_FILE_LINES',          i18nKey: 'settingMaxFileLines' },
         { key: 'keepRecentMessages',   name: 'keep-recent',       isFloat: false, min: 5,      max: 500,     env: '',                            i18nKey: 'settingKeepRecent' },
         { key: 'autoCompactThreshold', name: 'compact-threshold', isFloat: true,  min: 0.1,    max: 1.0,     env: '',                            i18nKey: 'settingCompactThreshold' },
@@ -1925,11 +2070,23 @@ export async function startTUI(options = {}) {
         };
 
         const handled = await handleLocalCommand(input, state, deps);
+        if (handled) {
+          if (store.currentModelKey !== state.activeModel) {
+            store.currentModelKey = state.activeModel;
+            store.lastMeasuredTokens = null;
+            state.lastTokenUsage = null;
+          }
+          store.setTokenEstimate(estimateContextTokens(state), getContextLimit(state.activeModel));
+        }
         if (handled && lines.length > 0) {
           const clean = lines.filter(l => l.trim()).join('\n');
           if (clean) for (const item of splitSystemOutput(clean)) store.addItem(item);
         }
-        if (!handled) store.addEvent('warn', uiText('command not recognized', 'comando no reconocido'), input);
+        if (!handled) {
+          const suggestion = require('../cli/command-suggest').suggestCommand(input.split(/\s+/)[0], SLASH_COMMANDS);
+          store.addEvent('warn', uiText('Unknown command', 'Comando desconocido'),
+            suggestion ? uiText(`Did you mean /${suggestion}?`, `¿Quisiste escribir /${suggestion}?`) : '/help');
+        }
       } catch (err) {
         store.addEvent('error', uiText('error', 'error'), err.message);
       } finally {

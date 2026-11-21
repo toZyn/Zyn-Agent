@@ -1,0 +1,12 @@
+import React from 'react';
+import {render} from 'ink';
+import {App} from '../src/tui/app.mjs';
+import {UIStore} from '../src/tui/store.mjs';
+const store=new UIStore();
+const state={activeModel:'zyncloud-minimax-m3',cwd:process.cwd(),language:'en',settings:{},turnCount:0};
+store.addItem({type:'system',text:'Confirmation fixture ready'});
+const app=render(React.createElement(App,{store,state,onSubmit:()=>{}}),{exitOnCtrlC:false,interactive:true});
+await new Promise(resolve=>setTimeout(resolve,180));
+const decision=await store.requestConfirm('Run command','Command: free -h && printf "hello" && df -h && whoami\nDirectory: /root/burpy-cli');
+store.addItem({type:'system',text:decision?'Command approved':'Command denied'});
+await app.waitUntilExit();

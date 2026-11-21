@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UIStore } from '../src/tui/store.mjs';
 
-test('the store retains only the latest visible items', () => {
+test('the store preserves earlier messages for scrolling', () => {
   const store = new UIStore((en) => en);
   for (let i = 0; i < 900; i++) store.addItem({ type: 'event', title: String(i) });
-  assert.equal(store.items.length, 400);
-  assert.equal(store.items[0].title, '500');
+  assert.equal(store.items.length, 900);
+  assert.equal(store.items[0].title, '0');
   assert.equal(store.items.at(-1).title, '899');
 });
 
@@ -43,4 +43,14 @@ test('conversation history undo and redo preserve messages', () => {
   assert.equal(store.items.filter(item => item.type === 'answer').length, 0);
   store.redoConversationTurn();
   assert.equal(store.items.at(-1).text, 'world');
+});
+
+
+test('agent preparation is replaced by the completed status without duplicating event cards', () => {
+  const store = new UIStore();
+  store.addEvent('tool', 'Preparing spawn_agent', '');
+  store.addEvent('ok', 'Completed spawn_agent', '{"agent_id":"a","role":"review","status":"running"}');
+  assert.equal(store.items.length, 1);
+  assert.equal(store.items[0].kind, 'ok');
+  assert.match(store.items[0].title, /Completed spawn_agent/);
 });

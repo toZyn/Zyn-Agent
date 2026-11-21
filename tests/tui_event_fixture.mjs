@@ -1,0 +1,11 @@
+import React from 'react';
+import {render} from 'ink';
+import {App} from '../src/tui/app.mjs';
+import {UIStore} from '../src/tui/store.mjs';
+const store=new UIStore();
+const state={activeModel:'zyncloud-minimax-m3',cwd:process.cwd(),language:'en',settings:{},turnCount:0};
+store.addItem({type:'banner',model:'minimax-m3',resumed:false,cwd:process.cwd()});
+store.addEvent('ok','Completed Command free -h','Exit code: 0\nSTDOUT: '+('1234567890'.repeat(130)));
+store.addEvent('ok','Completed Command df -h','Exit code: 0\nSTDOUT: '+('abcdefghij'.repeat(140)));
+const app=render(React.createElement(App,{store,state,onSubmit:()=>{}}),{exitOnCtrlC:false,interactive:true});
+await app.waitUntilExit();

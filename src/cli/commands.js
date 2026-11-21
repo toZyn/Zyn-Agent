@@ -3,7 +3,7 @@ const path = require('path');
 
 const fsp = fs.promises;
 const { DEFAULT_LANGUAGE, DEFAULT_MODEL_KEY, DEFAULT_SETTINGS, GEMINI_MODEL_WARNING, MODELS, listProvidersFromModels, countTokens, getSetting } = require('../config');
-const { languageLabel, normalizeLanguage, t } = require('../i18n');
+const { languageLabel, normalizeLanguage, SUPPORTED_LANGUAGES, t } = require('../i18n');
 const { createNewSessionState, listSessions, loadSessionState, saveState, listBackgroundResults, consumeBackgroundResult, enqueueBackgroundTask } = require('../utils/sessionStorage');
 const { truncateHistory } = require('../core/prompts');
 const { listGitSecrets, removeGitSecret, upsertGitSecret } = require('../utils/secretStorage');
@@ -11,6 +11,7 @@ const { clearGmailAuth, getGmailAuthStatus, startGmailOAuthFlow } = require('../
 const { exportTranscriptText, formatTranscriptPreview } = require('../utils/transcriptStorage');
 const { resolveInputPath } = require('../utils/pathUtils');
 const { getProviderBrand } = require('../providers/brand');
+const { modelDisplayId, resolveAccountModelKey } = require('../providers/model-id');
 const { detachBackgroundTurn } = require('../utils/backgroundWorker');
 const {
   describeProviderConfig,
@@ -53,7 +54,7 @@ const SLASH_COMMANDS = [
   { name: 'model', desc: 'choose or switch model', descEs: 'elegir o cambiar modelo' },
   { name: 'login', desc: 'connect an account', descEs: 'conectar una cuenta' },
   { name: 'logout', desc: 'disconnect an account', descEs: 'desconectar una cuenta' },
-  { name: 'account', desc: 'ChatGPT account status', descEs: 'estado de la cuenta ChatGPT' },
+  { name: 'account', desc: 'connected accounts and provider overview', descEs: 'cuentas conectadas y proveedores' },
   { name: 'context', desc: 'show current context size estimate', descEs: 'ver estimación de contexto' },
   { name: 'stats', desc: 'show real session counts', descEs: 'mostrar métricas reales de sesión' },
   { name: 'usage', desc: 'show session usage estimate, not billing', descEs: 'uso estimado, sin facturación' },
@@ -62,6 +63,7 @@ const SLASH_COMMANDS = [
   { name: 'auth', desc: 'connect ChatGPT plan, GitHub and Gmail', descEs: 'conectar plan ChatGPT, GitHub y Gmail' },
   { name: 'doctor', desc: 'diagnose setup and authentication', descEs: 'diagnosticar el entorno' },
   { name: 'tools', desc: 'list actual agent tools', descEs: 'listar herramientas reales' },
+  { name: 'agents', desc: 'list and manage subagents', descEs: 'listar y administrar subagentes' },
   { name: 'permissions', desc: 'inspect and change approval mode', descEs: 'gestionar aprobaciones' },
   { name: 'plan', desc: 'enforced read-only planning', descEs: 'planificar en solo lectura' },
   { name: 'init', desc: 'create project AGENTS.md', descEs: 'crear AGENTS.md del proyecto' },
@@ -148,7 +150,7 @@ function printModels() {
     console.log(`\n  [${brand.mark}] ${brand.label} (${provider.models.length} models)`);
     for (const model of provider.models) {
       const active = model.key === (global.__zynActiveModel || DEFAULT_MODEL_KEY) ? ' ◀' : '';
-      console.log(`    ${model.key.padEnd(16)} ${model.label}${active}`);
+      console.log(`    ${modelDisplayId(model.key, MODELS[model.key]).padEnd(16)} ${model.label}${active}`);
     }
   }
   console.log('');
@@ -162,7 +164,7 @@ function buildModelListItems() {
       const isActive = model.key === (global.__zynActiveModel || DEFAULT_MODEL_KEY);
       items.push({
         key: model.key,
-        label: `[${getProviderBrand(provider.key).mark}] ${model.label} (${model.key})`,
+        label: `[${getProviderBrand(provider.key).mark}] ${modelDisplayId(model.key, MODELS[model.key])} · ${model.label}`,
         provider: provider.key,
         active: isActive,
       });
@@ -278,7 +280,8 @@ async function runProviderModelsSelector(state, deps, providerKey) {
     try { await refreshChatGPTCatalog(); }
     catch (error) { console.log(`Unable to refresh ChatGPT models: ${error.message}`); return null; }
   }
-  if (providerKey === 'zyncloud') {
+  const hasLocalModels = Object.values(MODELS).some(model => model.provider === providerKey);
+  if (providerKey === 'zyncloud' && !(state.tuiSelect && hasLocalModels)) {
     try {
       const { syncProvider } = require('../providers/catalog');
       const models = await syncProvider(providerKey);
@@ -297,7 +300,7 @@ async function runProviderModelsSelector(state, deps, providerKey) {
   const providerGroup = listProvidersFromModels(MODELS).find(p => p.key === providerKey);
   const items = (providerGroup?.models || []).map(m => ({
     key: m.key,
-    label: `${m.key.padEnd(22)} ${m.label}`,
+    label: `${modelDisplayId(m.key, MODELS[m.key]).padEnd(22)} ${m.label}`,
     active: m.key === (state.activeModel || DEFAULT_MODEL_KEY),
   }));
 
@@ -340,7 +343,6 @@ async function runProviderModelsSelector(state, deps, providerKey) {
     MODELS[customKey] = {
       label: customModelId,
       provider: providerKey,
-      contextLength: 128000,
       ...extraFields,
     };
 
@@ -357,6 +359,8 @@ async function runProviderModelsSelector(state, deps, providerKey) {
 }
 
 async function switchActiveModel(state, deps, key) {
+  const currentProvider = MODELS[state.activeModel]?.provider;
+  if (currentProvider === 'chatgpt' && MODELS[`chatgpt:${key}`]?.provider === 'chatgpt') key = `chatgpt:${key}`;
   if (!MODELS[key]) {
     const available = Object.keys(MODELS).join(', ');
     throw new Error(`${t(state.language, 'modelInvalid')}: ${available}`);
@@ -449,7 +453,25 @@ async function handleLocalCommand(input, state, deps) {
     console.log(require('./session-metrics').formatSessionMetrics(state, {contextOnly: commandName === 'context'}));
     return true;
   }
-  if (commandName === 'account') return handleLocalCommand('/auth chatgpt status', state, deps);
+  if (commandName === 'account') {
+    const { listAuthenticationStatus } = require('./essentials');
+    const auth = await listAuthenticationStatus();
+    const current = MODELS[state.activeModel];
+    const en = state.language !== 'es';
+    console.log(en ? 'Zyn · Accounts and providers' : 'Zyn · Cuentas y proveedores');
+    console.log(`${en ? 'Current model' : 'Modelo actual'}: ${modelDisplayId(state.activeModel || DEFAULT_MODEL_KEY, current)}`);
+    console.log(`${en ? 'Current provider' : 'Proveedor actual'}: ${current?.provider || 'unknown'}`);
+    for (const name of ['chatgpt', 'github', 'gmail']) {
+      const record = auth[name];
+      const status = record?.authenticated ? (en ? 'connected' : 'conectado') : record?.installed ? (en ? 'not connected' : 'sin conexión') : (en ? 'unavailable' : 'no disponible');
+      const label = {chatgpt:'ChatGPT',github:'GitHub',gmail:'Gmail'}[name];
+      console.log(`${label}: ${status}`);
+    }
+    const configured = listConfiguredProviders().map(item => item.provider).filter(Boolean);
+    if (configured.length) console.log(`${en ? 'API providers configured' : 'Proveedores API configurados'}: ${[...new Set(configured)].join(', ')}`);
+    console.log(en ? 'Manage connections with /auth or /login <provider>.' : 'Administra conexiones con /auth o /login <proveedor>.');
+    return true;
+  }
   if (commandName === 'login') {
     const platform = args.trim().toLowerCase();
     if (!platform) { console.log('Usage: /login chatgpt | /login github | /login gmail'); return true; }
@@ -546,7 +568,7 @@ async function handleLocalCommand(input, state, deps) {
         flow.done.then(async account => {
           if (account.sharing) {
             const models = await refreshChatGPTCatalog();
-            const preferred = models[0] && `chatgpt-${models[0].slug}`;
+            const preferred = models[0] && resolveAccountModelKey(models[0].slug, MODELS);
             if (preferred) await switchActiveModel(state, deps, preferred);
             console.log(`ChatGPT plan authorized; ${models.length} models available.`);
           } else console.log('ChatGPT account connected without permission to use plan models.');
@@ -581,8 +603,17 @@ async function handleLocalCommand(input, state, deps) {
   if (commandName === 'memory' || commandName === 'summary') {
     const [sub, ...rest] = args.split(' ').filter(Boolean);
     const { getMemoryExportPrompt, saveImportedProfile } = require('../core/memory-transfer');
-    if (sub === 'prompt') console.log(getMemoryExportPrompt());
-    else if (sub === 'import' && rest.length) {
+    if (sub === 'prompt') {
+      if (rest.includes('--show')) console.log(getMemoryExportPrompt());
+      else {
+        const { formatOnboardingPreview } = require('../core/memory-transfer');
+        const { copyToClipboard } = require('../core/clipboard');
+        const prompt = getMemoryExportPrompt();
+        const result = copyToClipboard(prompt);
+        console.log(formatOnboardingPreview(prompt, process.stdout.columns || 62, state.language));
+        console.log(result.verified ? 'Full prompt copied to clipboard.' : 'Clipboard unverified; use /memory prompt --show to inspect the complete text.');
+      }
+    } else if (sub === 'import' && rest.length) {
       const filename = path.resolve(state.cwd || process.cwd(), rest.join(' '));
       const content = await fsp.readFile(filename, 'utf8');
       state.importedMemory = await saveImportedProfile(content);
@@ -634,16 +665,24 @@ async function handleLocalCommand(input, state, deps) {
   }
 
   if (commandName === 'lang' || commandName === 'language') {
-    if (!args) {
+    let selected = args;
+    if (!selected && typeof askSelect === 'function') {
+      selected = await askSelect({
+        title: state.language === 'es' ? 'Selecciona el idioma' : 'Choose language',
+        subtitle: `${t(state.language, 'langCurrent')}: ${languageLabel(state.language)}`,
+        items: SUPPORTED_LANGUAGES.map(key => ({ key, label: languageLabel(key) })),
+        initialIndex: Math.max(0, SUPPORTED_LANGUAGES.indexOf(normalizeLanguage(state.language))),
+        getLabel: item => item.label,
+        getValue: item => item.key,
+      });
+      if (!selected) return true;
+    }
+    if (!selected) {
       console.log(`${t(state.language, 'langCurrent')}: ${languageLabel(state.language)}`);
       return true;
     }
-
-    const nextLanguage = normalizeLanguage(args);
-    if (!['en', 'es'].includes(nextLanguage)) {
-      throw new Error(t(state.language, 'langInvalid'));
-    }
-
+    if (!/^(en|es)([-_][a-z0-9]+)*$/i.test(selected)) throw new Error(t(state.language, 'langInvalid'));
+    const nextLanguage = normalizeLanguage(selected);
     state.language = nextLanguage;
     await saveState(state);
     printLanguageChanged(nextLanguage);
@@ -885,10 +924,10 @@ async function handleLocalCommand(input, state, deps) {
     }
 
     const SETTINGS_SCHEMA = {
-      'max-tool-steps':       { key: 'maxToolSteps',         min: 1,      max: 500,     isFloat: false },
+      'max-tool-steps':       { key: 'maxToolSteps',         min: 0,      max: 50000,     isFloat: false },
       'request-timeout':      { key: 'requestTimeoutMs',     min: 5000,   max: 600000,  isFloat: false },
-      'max-history':          { key: 'maxHistoryChars',      min: 10000,  max: 2000000, isFloat: false },
-      'max-output':           { key: 'maxOutputChars',       min: 1000,   max: 500000,  isFloat: false },
+      'max-history':          { key: 'maxHistoryChars',      min: 0,  max: 200000000, isFloat: false },
+      'max-output':           { key: 'maxOutputChars',       min: 0,   max: 50000000,  isFloat: false },
       'max-file-lines':       { key: 'maxFileLines',         min: 100,    max: 100000,  isFloat: false },
       'keep-recent':          { key: 'keepRecentMessages',   min: 5,      max: 500,     isFloat: false },
       'compact-threshold':    { key: 'autoCompactThreshold', min: 0.1,    max: 1.0,     isFloat: true },
@@ -1306,6 +1345,77 @@ async function runModelsFlow(state, deps) {
     });
     console.log(state.cwd);
     return true;
+  }
+
+  if (commandName === 'agents') {
+    const { getCoordinator, ROLES } = require('../core/subagents');
+    const { defineAgent, readAgent, listDefinitions, removeDefinition } = require('../core/agent-definitions');
+    const coordinator = getCoordinator(state);
+    const words = String(args || '').trim().split(/\s+/).filter(Boolean);
+    const [action, id] = words;
+    if (!action || action === 'list') {
+      const active = coordinator.list();
+      console.log(active.length
+        ? active.map(a => a.agent_id.slice(0, 8) + '  ' + a.role.padEnd(7) + '  ' + a.status.padEnd(12) + '  ' + String(a.task || '').slice(0, 58)).join('\n')
+        : 'No subagents in the current session.');
+      return true;
+    }
+    if (action === 'definitions') {
+      const definitions = listDefinitions();
+      console.log(definitions.length
+        ? definitions.map(a => a.name.padEnd(22) + ' ' + a.role + '  ' + a.description).join('\n')
+        : 'No saved agent definitions.');
+      return true;
+    }
+    if (action === 'show') {
+      const definition = readAgent(id);
+      if (!definition) throw new Error('Unknown saved agent.');
+      console.log(JSON.stringify(definition, null, 2));
+      return true;
+    }
+    if (action === 'define') {
+      const match = String(args || '').match(/^define\s+([a-z][a-z0-9_-]+)\s+(explore|review|plan|general)\s+([\s\S]+)$/);
+      if (!match) throw new Error('Usage: /agents define <name> <explore|review|plan|general> <instructions>');
+      console.log('Saved specialist: ' + defineAgent({ name: match[1], role: match[2], instructions: match[3] }).name);
+      return true;
+    }
+    if (action === 'delete' && id) {
+      const approved = typeof state.tuiConfirm === 'function'
+        ? await state.tuiConfirm('Delete saved agent?', id) : false;
+      if (!approved) throw new Error('User approval required to delete saved agents.');
+      console.log(removeDefinition(id) ? 'Agent definition deleted.' : 'Definition not found.');
+      return true;
+    }
+    if (action === 'resume' && id) {
+      const agent = coordinator.lookup(id);
+      if (agent.role === 'general') {
+        const confirmed = typeof state.tuiConfirm === 'function'
+          ? await state.tuiConfirm('Resume writable agent?', 'This can retry actions after the previous interruption.')
+          : false;
+        if (!confirmed) throw new Error('Resuming writable work requires approval.');
+      }
+      console.log(JSON.stringify(coordinator.resume(id)));
+      return true;
+    }
+    if (action === 'send' && id) {
+      const message = String(args || '').split(/\s+/).slice(2).join(' ').trim();
+      console.log(JSON.stringify(coordinator.sendMessage('parent', id, message)));
+      return true;
+    }
+    if (action === 'inbox') {
+      const items = coordinator.readMessages('parent');
+      console.log(items.length ? items.map(x => x.from.slice(0, 8) + ': ' + x.content).join('\n') : 'No new subagent messages.');
+      return true;
+    }
+    if (action === 'stop' && id) {
+      console.log(JSON.stringify(coordinator.interrupt(id)));
+      return true;
+    }
+    if (action === 'close' && id) {
+      console.log(JSON.stringify(coordinator.close(id)));
+      return true;
+    }
+    throw new Error('Usage: /agents [list|definitions|show <name>|define <name> <role> <instructions>|delete <name>|resume <id>|send <id> <message>|inbox|stop <id>|close <id>]');
   }
 
   if (commandName === 'transcript') {

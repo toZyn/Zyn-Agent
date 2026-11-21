@@ -13,6 +13,8 @@ npm install -g zyn-ai
 zyn
 ```
 
+Development-only changes are tracked in [unreleased terminal and context fixes](docs/UNRELEASED_UX.md).
+
 **Release channels:** GitHub may contain a newer version than npm. An npm update is published separately after explicit maintainer approval.
 
 From source:
@@ -28,7 +30,7 @@ npm start
 
 ## First launch and imported memory
 
-On the first interactive launch, Zyn asks whether you want to transfer memories or preferences from another application. **This is optional.** If you agree, Zyn prints a ready-to-copy export prompt. Paste that prompt into the source application, copy its complete answer, paste it into Zyn and write `:save` on a line by itself. Write `:cancel` to abort instead.
+On the first interactive launch, Zyn offers an **optional** profile import. Press `Y` to import or Enter to skip. If importing, press `C` and Enter to copy the export prompt when needed (Termux API, supported desktop clipboard, or terminal OSC52), paste the response directly into the terminal, and press Enter on a blank line to finish. No second paste menu or `:save` command is required. `N` skips the import. The prompt is not printed in full by default. Invalid exports can be pasted again without exiting. The setup screen uses the terminal theme saved in Zyn settings. Clipboard support is terminal-dependent; copying may not be verifiable.
 
 The import remains on your machine until you choose to use a model. New Zyn sessions receive a copy of the imported profile, and resumed sessions use their stored copy. Profiles are treated as **user-provided context, not trusted instructions**. They may be sent to the selected model provider as part of the model's prompt. Review exported content and remove information you do not want to share before importing it.
 
@@ -36,11 +38,12 @@ You can also use a local file:
 
 ```sh
 zyn memory prompt
+zyn memory prompt --show
 zyn memory import ./export.md
 zyn memory forget
 ```
 
-Inside the agent, use `/memory prompt`, `/memory import <file>`, or `/memory forget`. Forget removes the imported profile and copies in saved Zyn sessions; it does not delete data in the original application or remove its backups.
+Inside the agent, `/memory prompt` copies the prompt and shows a short preview; `/memory prompt --show` explicitly prints the complete prompt. `/memory import <file>` imports a saved export, and `/memory forget` removes it. Forget removes the imported profile and copies in saved Zyn sessions; it does not delete data in the original application or remove its backups.
 
 ## ChatGPT account models without Codex CLI
 
@@ -53,7 +56,7 @@ zyn auth chatgpt status
 zyn auth chatgpt logout
 ```
 
-In the interactive agent, use `/auth chatgpt login` and `/providers` to select the ChatGPT account and its available models. Zyn displays the authorization URL; open it in a browser that can reach Zyn's `127.0.0.1` callback. Authentication on a different computer requires forwarding the callback securely. New sessions are explicitly authorized by the user; identity-only authorization does not grant model use.
+In the TUI, `/auth chatgpt login` (or `/login chatgpt`) presents a compact authorization panel and attempts to open the browser. `C` copies the full authorization URL, `O` tries the browser again, `L` explicitly shows the URL, and Escape cancels. After a successful login, the TUI offers a model selector. In a classic terminal, `zyn auth chatgpt login` presents equivalent options without printing the complete URL automatically. The browser must be able to reach Zyn's loopback `127.0.0.1` callback; authenticating from a different computer requires secure forwarding. Identity-only consent does not grant model use.
 
 The account token is saved with owner-only permissions in Zyn's local data directory. Zyn calls the public `/v1/models` and `/v1/responses` endpoints with the granted OAuth access token. This feature is subject to account eligibility, plan limits, preview capabilities and user consent. It is **not** an unlimited or unofficial ChatGPT API. See [Official Sign in with ChatGPT documentation](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
@@ -63,9 +66,9 @@ This implementation is independent of the separately licensed OpenAI Sign in wit
 
 The main commands are organized by workflow. Run `/help` in the TUI, `/help <command>` for focused usage, or `zyn help` in the shell. All discoverable commands are listed in the [full command reference](docs/COMMANDS.md).
 
-Examples: `/model` opens the selector, `/model <id>` switches models, `/login chatgpt` opens authorization, `/context` displays a labeled text-only token estimate, and `/stats` reports observable session counters. Neither `/stats` nor `/usage` claims to read your provider's billing data.
+Examples: `/model` opens the selector, `/model <id>` switches models, `/login chatgpt` opens authorization, `/account` shows connected accounts and the active provider (ChatGPT, GitHub and Gmail), `/context` displays provider-measured usage when supplied as well as labeled local estimates, and `/stats` reports observable session counters. Neither `/stats` nor `/usage` claims to read your provider's billing data.
 
-The native `zyn auth` command also supports `status`, `list`, `github login|status|logout`, `gmail login|status|logout`, and the ChatGPT login/status/models/logout flow. GitHub and Gmail require their respective installed official CLIs (or other existing supported credentials).
+The native `zyn auth` command also supports `status`, `list`, `github login|status|logout`, `gmail login|status|logout`, and the ChatGPT login/status/models/logout flow. Model IDs displayed in selectors and status bars are the actual provider IDs (`gpt-6-luna` rather than `chatgpt-gpt-6-luna`). Old prefixed session keys remain supported for migration. English is the default language even when the operating system uses a different locale; use `/lang` for a language picker, or `/lang es` and `/lang en` to switch immediately without restarting. GitHub and Gmail require their respective installed official CLIs (or other existing supported credentials).
 
 
 | Task | Command |
@@ -80,6 +83,15 @@ The native `zyn auth` command also supports `status`, `list`, `github login|stat
 | Stop or exit | `/stop`, `/exit` |
 
 Commands use the same underlying handlers in the classic CLI and the TUI wherever possible. Some selectors are rendered differently. Run `/help` for the complete grouped reference.
+
+
+## Context, tool execution and terminal stability
+
+Zyn uses model-specific context metadata when the provider supplies it. If the provider does not publish a verified context window, Zyn displays `?` instead of inventing a number. Actual token usage is reported from provider responses when available; `~` identifies an approximation. `/context` shows both measurements independently. This does not modify provider quotas or create unlimited context.
+
+The defaults for `max-tool-steps`, `max-history` and `max-output` are now `0`, which means **no arbitrary application-level cap** for those settings. Users can set an explicit limit with `/settings` to manage machine resources. Repeated identical tool calls that produce no progress trigger a protective pause. Normal permission approval, provider request timeouts, file-reading pagination and context-size constraints remain in effect.
+
+On mobile terminals, the framed header and colored activity indicators use the existing theme palette. Long tool output is summarized in the live viewport; `/transcript` opens a separate, scrollable preview of recent session events, while `/export` preserves the full transcript in a file. The conversation starts at the top of the available history area, and the input remains at the bottom; the transcript viewer uses a separate scroll area instead of mixing raw logs into messages.
 
 ## Universal Agent Skills
 
@@ -138,3 +150,21 @@ The TUI integration tests use Python 3 with a POSIX pseudo-terminal. They cover 
 See [Architecture](docs/ARCHITECTURE.md), [TUI testing](docs/TUI_TESTING.md), and [Capabilities and limitations](docs/AGENT_CAPABILITIES.md). Issues: [GitHub Issues](https://github.com/toZyn/Zyn-Agent/issues).
 
 MIT license. See [LICENSE](LICENSE).
+
+
+## Subagents (development branch)
+
+Zyn can delegate a scoped task to a child agent with its own model conversation and session transcript. Agents inherit the configured provider and working directory but never inherit automatic approval. Read-only roles are `explore`, `review`, and `plan`. The `general` role can propose modifications, but the parent's normal interactive permission approval is still required. By default, child context is isolated; use `fork: "all"` only when the extra parent context is needed. Subagents cannot spawn further agents.
+
+Delegation tools: `spawn_agent`, `wait_agent`, `list_agents`, `followup_agent`, `resume_agent`, `send_agent_message`, `read_agent_messages`, `interrupt_agent`, and `close_agent`. In the interactive terminal, `/agents` lists the current session's agents, and `/agents stop <id>` cancels one. Up to three simultaneous children per parent session are allowed by default. Closing the main TUI aborts running children.
+
+Subagent execution occurs in the same operating-system process and working tree, not a security-isolated container or automatically separated Git worktree. Use read-only roles for investigations or parallel reviews; avoid conflicting writable tasks, review each proposed change, and continue to require user approval for writes. Running several agents consumes provider requests and follows provider billing, rate limits, and context limits. This is a development feature; it has not been published to npm.
+
+### Android terminal resizing
+
+Zyn checks the terminal's reported dimensions when it receives a resize event and periodically while it runs. This helps when a mobile keyboard changes the terminal rows without delivering a standard resize event. Some embedded terminal clients keep reporting a stale height even after the keyboard opens; in those clients, `ZYN_TUI_ROWS=<rows> zyn` provides a manual height override. The operating system or terminal client must still report the correct viewport dimensions for fully automatic alignment.
+
+
+### Recoverable workers and reusable specialists
+
+Zyn keeps child run records and conversations across process restarts. Unfinished read-only workers can continue automatically when the parent session is reopened. General workers remain interrupted until explicit confirmation, preventing repeated file changes without permission. Reusable specialist definitions are stored in `~/.zyn/agents/` as private JSON files; manage them with `/agents define`, `/agents definitions`, `/agents show`, and `/agents delete`. Parent and child agents can communicate with `send_agent_message` and `read_agent_messages`. See [Subagent architecture](docs/SUBAGENTS.md) for persistence and safety boundaries.
