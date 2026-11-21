@@ -1,6 +1,6 @@
 ---
 name: methodology
-description: Professional engineering methodology: understand, investigate, map, classify, plan, execute, verify. Iron law of investigation before changes.
+description: "Professional engineering methodology: understand, investigate, map, classify, plan, execute, verify. Iron law of investigation before changes."
 ---
 
 # Metodología Profesional de Trabajo para Agentes de Ingeniería

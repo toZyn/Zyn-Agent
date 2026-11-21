@@ -1,6 +1,6 @@
 ---
 name: code-style
-description: Response style, code generation principles, and per-language conventions (JS/Node, Python, Bash, HTML/CSS) the agent must follow.
+description: "Response style, code generation principles, and per-language conventions (JS/Node, Python, Bash, HTML/CSS) the agent must follow."
 ---
 
 # Estilo de respuestas

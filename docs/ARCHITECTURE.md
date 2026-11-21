@@ -38,3 +38,13 @@ Zyn-Agent is a Node.js agent with a command-line interface, an Ink/React termina
 Ink 7 does not provide native `scrollable` or `mouse` attributes on `Box`. The application uses a height-limited virtual history viewport, renders only items fitting the visible row budget, and clips the live streaming area to keep the input and status bar on screen. PageUp/PageDown scroll through prior history; xterm mouse-wheel events are decoded from SGR mouse reports; the input editor ignores those reports. The scroll offset stays anchored when new items arrive, up to the viewport retention limit.
 
 Long slash-command output is split into smaller system items so it remains navigable rather than creating one oversized, clipped result. Only the last 400 UI items stay in memory; persistent sessions and transcripts are not modified by UI scrolling. Single unusually long messages may still be clipped within one item and deserve a separate text-pagination improvement.
+
+## Portable profile and workspace instructions
+
+`src/core/memory-transfer.js` owns the one-time consent prompt, validation, local profile file and deletion. `src/utils/sessionStorage.js` snapshots imported memory into session records, while `src/core/prompts.js` adds it to model context as untrusted user-provided information. Profiles are not copied into public logs by the importer. The user can remove global and session copies through `zyn memory forget` or `/memory forget`.
+
+`src/core/project-context.js` reads a bounded set of local `AGENTS.md`, `CLAUDE.md` and `QWEN.md` files. They provide workspace instructions, not elevated system/tool permissions.
+
+## Agent Skills
+
+`src/core/skills.js` validates YAML frontmatter, discovers projects and personal skill folders, downloads nested GitHub contents without running them, and exposes individual resources to `load_skill`. Skill bodies are not injected into the model prompt until requested; only descriptions appear in the index. Binary assets are preserved, while unsupported binary contents are not decoded into text. No general subagent runtime or lifecycle-hook executor is implemented. See `docs/AGENT_CAPABILITIES.md` for the comparison and gaps.

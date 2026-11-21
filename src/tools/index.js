@@ -66,7 +66,7 @@ const {
 } = require('../utils/secretStorage');
 const { resolveInputPath } = require('../utils/pathUtils');
 const { getGmailAuthStatus, gmailApiRequest } = require('../utils/gmailAuth');
-const { loadSkill, listSkills } = require('../core/skills');
+const { loadSkill, listSkills, readSkillResource } = require('../core/skills');
 const {
   formatLineRange,
   shortText,
@@ -94,7 +94,7 @@ const TOOL_DEFINITIONS = [
   { name: 'upload_file', usage: '{ path, field?, name?, type? }' },
   { name: 'gmail', usage: '{ action, query?, maxResults?, id?, to?, subject?, body? }' },
   { name: 'git', usage: '{ provider, action, method?, path?, body?, headers?, name?, repoUrl?, destination?, branch?, timeoutMs? }' },
-  { name: 'load_skill', usage: '{ name }' },
+  { name: 'load_skill', usage: '{ name, resource? }' },
   { name: 'memory', usage: '{ action, key?, value?, query? }' },
   { name: 'ask_user', usage: '{ question, options }' },
 ];
@@ -241,10 +241,12 @@ function getToolPromptText() {
     '',
     '## Skills (carga bajo demanda)',
     '',
-    'load_skill { name }',
+    'load_skill { name, resource? }',
     '  Carga el contenido completo de una skill listada en "## Available Skills" del system prompt.',
-    '  Las skills viven en data/skills/<name>/SKILL.md. Solo el INDEX (nombre + descripcion) esta',
+    '  Skills universales en .agents/skills, .claude/skills, .qwen/skills y ~/.zyn/skills.',
     '  siempre disponible; el cuerpo completo se carga on-demand cuando lo necesitas.',
+    '  SKILL.md se carga al invocar. references/, scripts/ y assets/ se conservan.',
+    '  Para leer un recurso usa load_skill con {name,resource}. No se ejecuta automaticamente.',
     '  Llama load_skill ANTES de aplicar las reglas de una skill a la tarea actual.',
     '  Si name esta vacio, la herramienta devuelve la lista completa de skills disponibles.',
     '  Ejemplo: {"type":"tool","tool":"load_skill","args":{"name":"testing"}}',
@@ -556,21 +558,25 @@ async function loadSkillTool(args, state) {
   const lang = state?.language || 'es';
   const name = String(args?.name || '').trim();
   if (!name) {
-    const all = listSkills();
+    const all = listSkills({ cwd: state?.cwd });
     const list = all.map(s => `- \`${s.name}\` — ${s.description || s.title || ''}`).join('\n');
     throw new Error(t(lang, `load_skill requiere name. Skills disponibles:\n${list}`, `load_skill requires name. Available skills:\n${list}`));
   }
-  const skill = loadSkill(name);
+  const skill = loadSkill(name, { cwd: state?.cwd });
   if (!skill) {
-    const all = listSkills();
+    const all = listSkills({ cwd: state?.cwd });
     const list = all.map(s => `- \`${s.name}\` — ${s.description || s.title || ''}`).join('\n');
     throw new Error(t(lang, `Skill "${name}" no encontrada. Skills disponibles:\n${list}`, `Skill "${name}" not found. Available skills:\n${list}`));
+  }
+  if (args?.resource) {
+    const text = readSkillResource(name, String(args.resource), { cwd: state?.cwd });
+    return `Skill resource: ${name}/${args.resource}\n\n${text}`;
   }
   const maxChars = 12000;
   const body = skill.body.length > maxChars
     ? `${skill.body.slice(0, maxChars)}\n\n[...contenido truncado, total ${skill.body.length} caracteres]`
     : skill.body;
-  return `Skill: ${skill.name}\nTitle: ${skill.title}\nDescription: ${skill.description}\n\n${body}`;
+  return `Skill: ${skill.name}\nTitle: ${skill.title}\nDescription: ${skill.description}\nDirectory: ${skill.folder}\nResources: ${skill.resources.join(', ') || 'none'}\n\n${body}`;
 }
 
 async function memoryTool(args, state) {

@@ -1,6 +1,6 @@
 ---
 name: reasoning
-description: Planning, reasoning, and problem-decomposition framework: causal, exploratory, constructive, and debugging modes plus anticipation of edge cases.
+description: "Planning, reasoning, and problem-decomposition framework: causal, exploratory, constructive, and debugging modes plus anticipation of edge cases."
 ---
 
 # Razonamiento y planificacion

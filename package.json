@@ -1,8 +1,8 @@
 {
   "name": "zyn-ai",
-  "version": "1.5.3",
-  "description": "Production-ready AI agent for CLI and TUI with real tool execution, 28+ providers, 217+ models, memory, and automation",
-  "author": "SoyMaycol",
+  "version": "1.6.0",
+  "description": "Terminal coding agent with tools, persistent sessions, MCP integrations and portable Agent Skills",
+  "author": "Zyn",
   "keywords": [
     "ai-agent",
     "cli-ai",
@@ -46,7 +46,8 @@
     "ink": "^7.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "session-file-store": "^1.5.0"
+    "session-file-store": "^1.5.0",
+    "yaml": "^2.9.1"
   },
   "repository": {
     "type": "git",
@@ -64,6 +65,7 @@
     "zyn.js",
     "src/",
     "data/",
+    "docs/",
     "README.md",
     "LICENSE"
   ],

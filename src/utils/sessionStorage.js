@@ -13,6 +13,7 @@ const {
   SESSIONS_DIR,
 } = require('../config');
 const { normalizeLanguage } = require('../i18n');
+const { readImportedProfile } = require('../core/memory-transfer');
 const { getTranscriptPath } = require('./transcriptStorage');
 
 function createState(rl = null) {
@@ -25,6 +26,7 @@ function createState(rl = null) {
     cwd: process.cwd(),
     history: [],
     memorySummary: '',
+    importedMemory: '',
     sessionMemory: {},
     rl,
     actionLog: [],
@@ -170,12 +172,30 @@ async function readJson(filePath) {
 async function writeJson(filePath, data) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp`;
-  await fsp.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf8');
+  await fsp.writeFile(tempPath, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   try {
     await fsp.rename(tempPath, filePath);
+    await fsp.chmod(filePath, 0o600).catch(() => {});
   } catch {
-    await fsp.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+    await fsp.writeFile(filePath, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await fsp.chmod(filePath, 0o600).catch(() => {});
     await fsp.unlink(tempPath).catch(() => {});
+  }
+}
+
+async function forgetImportedMemoryEverywhere() {
+  const { clearImportedProfile } = require('../core/memory-transfer');
+  await clearImportedProfile();
+  await ensureSessionStorage();
+  const files = await fsp.readdir(SESSIONS_DIR);
+  for (const filename of files) {
+    if (!filename.endsWith('.json')) continue;
+    const target = path.join(SESSIONS_DIR, filename);
+    const session = await readJson(target);
+    if (session?.importedMemory) {
+      delete session.importedMemory;
+      await writeJson(target, session);
+    }
   }
 }
 
@@ -197,6 +217,7 @@ function applyLoadedState(state, loaded) {
   state.cwd = loaded.cwd;
   state.history = Array.isArray(loaded.history) ? loaded.history : [];
   state.memorySummary = loaded.memorySummary ?? '';
+  state.importedMemory = loaded.importedMemory || '';
   state.sessionMemory = loaded.sessionMemory && typeof loaded.sessionMemory === 'object' ? loaded.sessionMemory : {};
   state.actionLog = Array.isArray(loaded.actionLog) ? loaded.actionLog : [];
   state.turnCount = Number(loaded.turnCount ?? 0);
@@ -228,6 +249,7 @@ async function saveState(state) {
     cwd: state.cwd,
     history: state.history,
     memorySummary: state.memorySummary,
+    importedMemory: state.importedMemory || '',
     sessionMemory: state.sessionMemory || {},
     actionLog: state.actionLog,
     turnCount: state.turnCount,
@@ -264,6 +286,7 @@ async function createNewSessionState(rl) {
   state.sessionPath = getSessionPath(state.sessionId);
   state.transcriptPath = getTranscriptPath(state.sessionId);
   await applyPersistentConfig(state);
+  state.importedMemory = await readImportedProfile();
   await saveState(state);
   return state;
 }
@@ -283,6 +306,7 @@ async function loadSessionState(sessionId, rl) {
     sessionPath: filePath,
   });
   await applyPersistentConfig(state);
+  if (!state.importedMemory) state.importedMemory = await readImportedProfile();
   return state;
 }
 
@@ -346,6 +370,7 @@ function estimateHistoryChars(messages) {
 }
 
 module.exports = {
+  forgetImportedMemoryEverywhere,
   applyLoadedState,
   completeBackgroundTask,
   consumeBackgroundResult,

@@ -1290,7 +1290,12 @@ export function App({ store, state, onSubmit }) {
       return;
     }
     if (!store.confirmRequest) {
-      const page = Math.max(1, Math.floor((height - 6) / 2));
+      const visible = selectViewportItems(store.items, {
+        columns: width,
+        rows: Math.max(1, height - 8),
+        offset: store.scrollOffset,
+      });
+      const page = Math.max(1, visible.length - 1);
       if (key.pageUp || (key.ctrl && key.upArrow)) { store.scrollBy(page); return; }
       if (key.pageDown || (key.ctrl && key.downArrow)) { store.scrollBy(-page); return; }
       if (key.ctrl && key.home) { store.scrollBy(Infinity); return; }
@@ -1447,6 +1452,7 @@ export async function startTUI(options = {}) {
                 cwd: state.cwd,
                 history: state.history || [],
                 memorySummary: state.memorySummary || '',
+                importedMemory: state.importedMemory || '',
                 sessionMemory: state.sessionMemory || {},
                 actionLog: state.actionLog || [],
                 turnCount: state.turnCount || 0,
@@ -1593,6 +1599,7 @@ export async function startTUI(options = {}) {
         sessionPath: newState.sessionPath,
         history: newState.history || [],
         memorySummary: newState.memorySummary || '',
+        importedMemory: newState.importedMemory || '',
         turnCount: newState.turnCount || 0,
         title: newState.title || 'New session',
       });
@@ -1621,6 +1628,7 @@ export async function startTUI(options = {}) {
     state.sessionPath = loadedState.sessionPath;
     state.history = loadedState.history || [];
     state.memorySummary = loadedState.memorySummary || '';
+    state.importedMemory = loadedState.importedMemory || '';
     state.sessionMemory = loadedState.sessionMemory || {};
     state.actionLog = loadedState.actionLog || [];
     state.turnCount = loadedState.turnCount || 0;

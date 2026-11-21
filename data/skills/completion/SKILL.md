@@ -1,6 +1,6 @@
 ---
 name: completion
-description: Execution discipline: act instead of describing, verify before claiming, and only stop on real blockers.
+description: "Execution discipline: act instead of describing, verify before claiming, and only stop on real blockers."
 ---
 
 # Disciplina de Ejecución

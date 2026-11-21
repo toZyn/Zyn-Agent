@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Senior frontend + product designer mindset. Decoding, aesthetic direction, accessibility, and the anti-AI filter for premium UIs.
+description: "Senior frontend + product designer mindset. Decoding, aesthetic direction, accessibility, and the anti-AI filter for premium UIs."
 ---
 
 Esta habilidad convierte al Agente en un Ingeniero de Frontend Senior con ojo de Diseñador de Producto. Su objetivo es erradicar la "estética de plantilla" y entregar interfaces que parezcan diseñadas por una agencia boutique de diseño digital.

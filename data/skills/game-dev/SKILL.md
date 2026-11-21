@@ -1,6 +1,6 @@
 ---
 name: game-dev
-description: Creation of browser-based games using Babylon.js, Phaser, and PlayCanvas. Includes project setup and development workflow.
+description: "Creation of browser-based games using Babylon.js, Phaser, and PlayCanvas. Includes project setup and development workflow."
 ---
 
 # Skill: Game Development

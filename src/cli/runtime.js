@@ -453,6 +453,24 @@ async function main() {
     return;
   }
 
+  if (rawArgs[0] === 'memory') {
+    const { getMemoryExportPrompt, saveImportedProfile, clearImportedProfile, markMemoryOnboarding } = require('../core/memory-transfer');
+    const { forgetImportedMemoryEverywhere } = require('../utils/sessionStorage');
+    const action = rawArgs[1];
+    if (action === 'prompt') { console.log(getMemoryExportPrompt()); return; }
+    if (action === 'import' && rawArgs[2]) {
+      const fs = require('node:fs/promises');
+      const content = await fs.readFile(rawArgs[2], 'utf8');
+      await saveImportedProfile(content);
+      await markMemoryOnboarding();
+      console.log('Memory imported for new sessions.');
+      return;
+    }
+    if (action === 'forget') { await forgetImportedMemoryEverywhere(); console.log('Imported memory deleted from Zyn sessions.'); return; }
+    console.log('Usage: zyn memory prompt | zyn memory import <file> | zyn memory forget');
+    return;
+  }
+
   if (rawArgs[0] === 'skills') {
     const { installSkill, listSkills } = require('../core/skills');
     const sub = rawArgs[1];
@@ -468,6 +486,11 @@ async function main() {
         console.error(`  ✗ Error: ${err.message}`);
         process.exit(1);
       }
+    } else if (sub === 'show' && rawArgs[2]) {
+      const { loadSkill, readSkillResource } = require('../core/skills');
+      const skill = loadSkill(rawArgs[2]);
+      if (!skill) throw new Error('Skill not found');
+      console.log(rawArgs[3] ? readSkillResource(rawArgs[2], rawArgs[3]) : `${skill.body}\n\nResources: ${skill.resources.join(', ') || 'none'}`);
     } else if (sub === 'list') {
       const skills = listSkills();
       console.log('\n  Skills instaladas:');
@@ -478,6 +501,7 @@ async function main() {
       console.log('\n  Uso:');
       console.log('    node zyn.js skills install <owner/repo> [name]');
       console.log('    node zyn.js skills list');
+      console.log('    node zyn.js skills show <name> [resource]');
     }
     return;
   }
@@ -536,6 +560,10 @@ async function main() {
     return;
   }
 
+  if (process.env.ZYN_SKIP_ONBOARDING !== '1') {
+    const { firstRunMemoryOnboarding } = require('../core/memory-transfer');
+    await firstRunMemoryOnboarding();
+  }
   await runInteractiveChat(options);
 }
 

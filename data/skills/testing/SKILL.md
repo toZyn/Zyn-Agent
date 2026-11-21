@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Iron law of verification: no delivery without validation. Real, specific, repeatable checks for every change.
+description: "Iron law of verification: no delivery without validation. Real, specific, repeatable checks for every change."
 ---
 
 # Verificación Sistemática para Agentes

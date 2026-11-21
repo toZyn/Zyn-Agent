@@ -22,3 +22,5 @@ The tests run within a temporary data directory and do not alter normal user ses
 For manual extended stress, use `ZYN_FLOOD_MESSAGES=10000 node tests/tui_flood.mjs` in an interactive terminal. That fixture prints message count, elapsed time, retained viewport items, and RSS memory after completion. It is a UI benchmark rather than a provider/network benchmark. Large single-message rendering remains distinct from flooding the history with many messages.
 
 Ink disables interactive output by default under `CI` / `GITHUB_ACTIONS`, even with a TTY. The TUI explicitly enables Ink interactivity only when both standard input and output are TTYs. The PTY regression suite includes this environment to detect blank screens in CI.
+
+The first-launch integration scenario additionally verifies that memory onboarding is optional, accepts a fenced multiline export, writes a private profile file and creates a session snapshot. `ZYN_SKIP_ONBOARDING=1` is used by automated unrelated TUI tests to avoid accidental first-run prompts; the onboarding flow is tested explicitly without that flag.

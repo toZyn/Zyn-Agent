@@ -17,21 +17,21 @@ ANSI = re.compile(r'\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[PX^_].
 
 
 class Terminal:
-    def __init__(self, cols=80, rows=24, command=None, env_extra=None):
+    def __init__(self, cols=80, rows=24, command=None, env_extra=None, wait_ready=True):
         self.tmp = tempfile.TemporaryDirectory(prefix='zyn-tui-test-')
         self.master, slave = pty.openpty()
         self._winsize(slave, cols, rows)
         env = os.environ.copy()
         env.pop('NO_COLOR', None)
         env.pop('FORCE_COLOR', None)
-        env.update({'TERM': 'xterm-256color', 'ZYN_DATA_DIR': self.tmp.name})
+        env.update({'TERM': 'xterm-256color', 'ZYN_DATA_DIR': self.tmp.name, 'ZYN_SKIP_ONBOARDING': '1'})
         if env_extra: env.update(env_extra)
         self.proc = subprocess.Popen(command or ['node', 'zyn.js'], cwd=ROOT, stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True)
         os.close(slave)
         self.capture = bytearray()
         self.read(0.3)
         deadline = time.monotonic() + 6
-        while b'\xe2\x9d\xaf' not in self.capture and self.proc.poll() is None and time.monotonic() < deadline:
+        while wait_ready and b'\xe2\x9d\xaf' not in self.capture and self.proc.poll() is None and time.monotonic() < deadline:
             self.read(0.1)
 
     def _winsize(self, fd, cols, rows):
@@ -101,13 +101,36 @@ class TuiIntegrationTests(unittest.TestCase):
         finally:
             term.close()
 
+    def test_first_run_memory_import_wizard_and_new_session_snapshot(self):
+        term = Terminal(env_extra={'ZYN_SKIP_ONBOARDING': '0'}, wait_ready=False)
+        try:
+            self.assertIn('importar la memoria', term.text)
+            term.send(b's\n', 0.4)
+            self.assertIn('Export everything you know', term.text)
+            doc = b'```markdown\n## MEMORIES\n### Personal Context\n1. Peru\n## PREFERENCES\n### Tone\n1. Clear\n```\n:save\n'
+            term.send(doc, 0.8)
+            self.assertIn('Memoria importada', term.text)
+            self.assertIn('## MEMORIES', (Path(term.tmp.name) / 'chat' / 'imported-memory.md').read_text())
+            term.send(b'/exit\r', 0.35)
+            self.assertEqual(term.wait_exit(), 0)
+            sessions = list((Path(term.tmp.name) / 'chat' / 'sessions').glob('*.json'))
+            self.assertTrue(sessions)
+            import json
+            self.assertIn('Personal Context', json.loads(sessions[0].read_text())['importedMemory'])
+        finally:
+            term.close()
+
     def test_combined_exit_and_enter(self):
         self.term.send(b'/exit\r', 0.25)
         self.assertEqual(self.term.wait_exit(), 0)
 
     def test_help_and_exit_in_rapid_events(self):
         self.term.send(b'/help\r', 0.6)
-        self.assertIn('zyncloud', self.term.text.lower())
+        for _ in range(6):
+            if '/skills' in self.term.text.lower():
+                break
+            self.term.send(b'\x1b[5~', 0.2)
+        self.assertIn('/skills', self.term.text.lower())
         self.term.send(b'/exit\r', 0.3)
         self.assertEqual(self.term.wait_exit(), 0)
 

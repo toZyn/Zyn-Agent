@@ -1,6 +1,6 @@
 ---
 name: domains
-description: Expert knowledge per domain: Node/Express, React, Git, Docker, databases, HTTP/REST, scraping, Linux/sysadmin, security, and enterprise operations.
+description: "Expert knowledge per domain: Node/Express, React, Git, Docker, databases, HTTP/REST, scraping, Linux/sysadmin, security, and enterprise operations."
 ---
 
 # Expertise en dominios especificos

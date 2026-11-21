@@ -1,6 +1,6 @@
 ---
 name: core
-description: Agent identity, role, behavioral guidelines, and the strict JSON-only response format Zyn must follow.
+description: "Agent identity, role, behavioral guidelines, and the strict JSON-only response format Zyn must follow."
 ---
 
 # Identidad y Rol

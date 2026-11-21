@@ -1,411 +1,112 @@
-# Zyn Agent — AI Agent for Your Terminal
+# Zyn Agent
 
-<p align="center">
-  <img src="https://i.ibb.co/46VHVKb/47-sin-t-tulo-20260702143433.png" alt="Zyn AI Agent Logo" width="180" />
-</p>
+A terminal-based coding agent with an Ink TUI, CLI, model-provider adapters, local tools, session storage, MCP connections and portable Agent Skills. Built for Node.js 22 or newer.
 
-<p align="center">
-  <img src="https://img.shields.io/npm/v/zyn-ai?label=npm&color=%23CB3837" alt="NPM Version"/>
-  <img src="https://img.shields.io/github/v/release/SoyMaycol/Zyn?include_prereleases&sort=semver" alt="Latest Release"/>
-  <img src="https://img.shields.io/npm/dt/zyn-ai" alt="Downloads"/>
-  <img src="https://img.shields.io/github/license/SoyMaycol/Zyn" alt="License"/>
-  <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node.js 22+"/>
-</p>
+The source code and current implementation live at [toZyn/Zyn-Agent](https://github.com/toZyn/Zyn-Agent). This README describes implemented behavior, not a promise of feature parity with other coding agents.
 
-<p align="center">
-  <b>Terminal AI agent with 27 providers, 414 models, plugin system, MCP support, and zero vendor lock-in.</b>
-</p>
+## Install
 
-<p align="center">
-  <a href="#installation">Install</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#commands">Commands</a> ·
-  <a href="#providers--models">Providers</a> ·
-  <a href="#plugins">Plugins</a> ·
-  <a href="#mcp-servers">MCP</a> ·
-  <a href="#themes">Themes</a>
-</p>
-
----
-
-## What Is Zyn?
-
-Zyn is a command-line AI agent that runs on your machine. It connects to any LLM provider (OpenAI, Anthropic, Gemini, Groq, etc.), executes real tools (shell commands, file operations, web searches), and remembers context across sessions.
-
-It's not a chat wrapper. It's an agent that actually does things — runs commands, reads/writes files, searches the web, creates images, and talks to MCP servers. You can extend it with plugins from npm.
-
-**Honest assessment:** Zyn works well for terminal-based AI workflows. It has real tool execution, persistent memory, and a plugin system. It's not perfect — some edge cases with streaming can be rough, and the TUI occasionally glitches. But it gets the job done for developers who want AI in their terminal without vendor lock-in.
-
----
-
-## Installation
-
-```bash
-# Install globally
+```sh
 npm install -g zyn-ai
+zyn
+```
 
-# Or use directly
-npx zyn-ai
+From source:
 
-# From source
+```sh
 git clone https://github.com/toZyn/Zyn-Agent.git
 cd Zyn-Agent
-npm install
+npm ci
 npm start
 ```
 
-**Requirements:** Node.js 22+
+`zyn "Explain this repository"` runs one prompt. `zyn --resume` resumes the most recent session; `zyn --resume <id>` opens a specific one. Interactive sessions launch the TUI when Ink is installed.
 
----
+## First launch and imported memory
 
-## Quick Start
+On the first interactive launch, Zyn asks whether you want to transfer memories or preferences from another application. **This is optional.** If you agree, Zyn prints a ready-to-copy export prompt. Paste that prompt into the source application, copy its complete answer, paste it into Zyn and write `:save` on a line by itself. Write `:cancel` to abort instead.
 
-```bash
-zyn               # Full TUI with streaming, themes, plugins
-zyn "your prompt" # Single CLI prompt
-zyn --new         # Fresh session
-zyn --resume ID   # Resume a previous session
+The import remains on your machine until you choose to use a model. New Zyn sessions receive a copy of the imported profile, and resumed sessions use their stored copy. Profiles are treated as **user-provided context, not trusted instructions**. They may be sent to the selected model provider as part of the model's prompt. Review exported content and remove information you do not want to share before importing it.
+
+You can also use a local file:
+
+```sh
+zyn memory prompt
+zyn memory import ./export.md
+zyn memory forget
 ```
 
-First run: Zyn starts with a free model (Zen/Nemotron). Use `/providers` to configure your own API keys, then `/models` to pick a model.
+Inside the agent, use `/memory prompt`, `/memory import <file>`, or `/memory forget`. Forget removes the imported profile and copies in saved Zyn sessions; it does not delete data in the original application or remove its backups.
 
+## Core commands
 
+| Task | Command |
+| --- | --- |
+| Help and status | `/help`, `/status` |
+| Sessions | `/new`, `/sessions`, `/resume <id>` |
+| Models and providers | `/models`, `/providers`, `/provider` |
+| Context and preferences | `/memory`, `/settings`, `/persona`, `/lang` |
+| Project and skills | `/cwd <path>`, `/skills list`, `/skills show <name>` |
+| External tools | `/mcp`, `/plugins`, `/git` |
+| Session history and output | `/history`, `/compact`, `/transcript`, `/export` |
+| Stop or exit | `/stop`, `/exit` |
 
-https://github.com/user-attachments/assets/a66690d6-db83-4d5a-8482-d0af98a8b7e4
+Commands use the same underlying handlers in the classic CLI and the TUI wherever possible. Some selectors are rendered differently. Run `/help` for the complete grouped reference.
 
+## Universal Agent Skills
 
+Zyn discovers standard skill directories in projects and user-level locations, including `.agents/skills/`, `.claude/skills/`, `.qwen/skills/` and `~/.zyn/skills/`. It continues to load bundled legacy skills. Each skill consists of `SKILL.md` with YAML frontmatter (`name`, `description`) and may include `references/`, `scripts/`, `assets/`, and other files.
 
----
-
-## Features
-
-### Agent Core
-
-- **Tool execution** — run commands, read/write files, edit code, search web, create images
-- **Persistent memory** — saves context across sessions (`/memory`, `/summary`)
-- **Session management** — full history, resume, export, transcripts
-- **Background jobs** — `/bg` for long-running tasks, `/jobs` to manage them
-- **Streaming** — live token output, thinking indicators, cancel with ESC
-- **i18n** — English/Spanish with auto-detection
-- **Configurable limits** — timeouts, history size and context windows are configurable; the TUI keeps the latest 400 rendered items while session history remains persisted
-
-### Providers & Models
-
-- **27 providers** — OpenAI, Anthropic, Google Gemini, Groq, Together, OpenRouter, Mistral, xAI, Cohere, Fireworks, Perplexity, Ollama, GitHub Models, Azure, AWS Bedrock, Vertex AI, Cloudflare, LM Studio, Novita, Chutes, Inference.net, Replicate, DeepSeek, HuggingFace, Zen, Qwen, Zyn Cloud, Custom
-- **414 built-in models** — real model IDs, no fake entries
-- **Dynamic model picker** — `/models` opens interactive selector
-- **Custom model IDs** — type any model ID (with warning if not registered)
-- **Auto-discovery** — `/provider sync` fetches latest model lists
-
-### TUI Interface
-
-- **Interactive selection** — model picker, provider selector, theme chooser
-- **Real-time streaming** — thinking blocks, tool call logs, live token counter
-- **24 built-in themes** — dark, light, gruvbox, dracula, nord, solarized, monokai, tokyo-night, matrix, cyberpunk, vaporwave, rosePine, catppuccin, and more
-- **Dynamic theme chooser** — `/theme` opens interactive picker with preview
-- **Responsive** — adapts to any terminal width, listens to resize events
-- **Scrollable history** — PageUp/PageDown or mouse wheel navigates previous messages; streaming output is clipped within the viewport to keep controls visible
-- **No emojis** — clean text UI with symbols (`>`, `·`, `x`)
-
-### Plugin System
-
-- **`/plugins` command** — install, uninstall, list community plugins
-- **npm-based** — install from npmjs registry
-- **Plugin types** — themes, skills, tools, prompts, commands, UI components
-- **Security model** — consent required before install, warns about permissions
-- **Sandboxed** — plugins run in restricted context, no full system access
-
-### MCP Servers
-
-- **`/mcp` commands** — connect, disconnect, list, import
-- **Model Context Protocol** — connect to external tool servers
-- **Auto-discovery** — detect MCP servers from URLs
-- **Tool integration** — MCP tools appear alongside built-in tools
-
----
-
-## Commands
-
-### Core
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show help |
-| `/status` | Current model, provider, session info |
-| `/history` | Last 20 actions |
-| `/memory` | Show memory summary |
-| `/session` | Current session info |
-| `/sessions` | List all sessions |
-| `/new` | New session |
-| `/resume <ID>` | Resume session |
-| `/title <text>` | Rename session |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `/models` | Model picker |
-| `/providers` | Provider selector (prompts for an optional Zyn Cloud API key) |
-| `/provider set <name> <field> <value>` | Set provider config |
-| `/provider remove <name>` | Remove provider |
-| `/provider sync <name>` | Fetch latest models |
-| `/theme` | Theme picker (24 themes) |
-| `/theme <name>` | Switch theme directly |
-| `/lang <en\|es>` | Change language |
-| `/auto on\|off` | Auto-approve tools |
-| `/persona set <text>` | Set AI persona |
-| `/config show` | Show all config |
-| `/cwd <path>` | Change working directory |
-
-### Plugins
-
-| Command | Description |
-|---------|-------------|
-| `/plugins` | Open plugin manager |
-| `/plugins list` | List installed plugins |
-| `/plugins install <name>` | Install from npm |
-| `/plugins uninstall <name>` | Remove plugin |
-| `/plugins search <query>` | Search npm for plugins |
-
-### MCP Servers
-
-| Command | Description |
-|---------|-------------|
-| `/mcp` | Open MCP manager |
-| `/mcp connect <name> <url>` | Connect to MCP server |
-| `/mcp disconnect <name>` | Disconnect server |
-| `/mcp list` | List connected servers |
-| `/mcp tools <name>` | List server tools |
-| `/mcp import` | Auto-discover MCP servers |
-
-### Export & Control
-
-| Command | Description |
-|---------|-------------|
-| `/export` | Export session to txt |
-| `/bg` | Detach to background |
-| `/jobs` | List background jobs |
-| `/stop` | Stop current turn |
-| `/clear` | Reset session |
-| `/exit` | Exit Zyn |
-
----
-
-## Providers & Models
-
-Zyn connects to 27 LLM providers. Configure with `/providers`, then pick a model with `/models`.
-
-**Free options (no API key):**
-- Zen (Nemotron, Mimo) — default, works out of the box
-
-**Popular paid providers:**
-- OpenAI — GPT-4o, GPT-5, o1, o3
-- Anthropic — Claude 3.5 Sonnet, Claude 4
-- Google — Gemini 2.5 Pro, Gemini 2.5 Flash
-- Groq — Llama 3.3, Mixtral (fast inference)
-- Together — DeepSeek, Llama, Qwen models
-- OpenRouter — access to multiple providers
-- Zyn Cloud — OpenAI-compatible endpoint; API key is optional and can be entered from `/providers`
-
-```bash
-# Configure a provider
-/provider set openai apiKey sk-xxx
-
-# Optional: save a Zyn Cloud key
-/provider set zyncloud apiKey sk-xxx
-
-# Pick a model
-/models
+```text
+.agents/skills/code-audit/
+├── SKILL.md
+├── references/
+│   └── checklist.md
+├── scripts/
+│   └── check.py
+└── assets/
+    └── template.json
 ```
 
----
+Zyn includes skill names and descriptions in the agent context, then loads full instructions only when needed. Bundled resources are accessible on demand through `load_skill {name, resource}`. **Installing a skill never executes its scripts automatically.** Inspect third-party scripts before authorizing their execution with other tools.
 
-## Themes
-
-Zyn includes 24 built-in themes with dynamic selection.
-
-```bash
-/theme                  # Interactive theme picker
-/theme gruvbox          # Switch directly
-/theme random           # Random theme
-/theme list             # List all themes
+```sh
+zyn skills list
+zyn skills show code-audit
+zyn skills show code-audit references/checklist.md
+zyn skills install owner/repository/path/to/skill
 ```
 
-**Built-in themes:** dark, cappuccino, light, coffee, gruvbox, dracula, nord, solarized, monokai, tokyo-night, matrix, synthwave, rosePine, catppuccin, oneDark, materialPalenight, cyberpunk, arctic, ember, lavender, midnight, sunset, ocean, vaporwave.
+You can also use `/skills list`, `/skills show <name> [resource]`, and `/skills install <owner/repo/path> [name]` in the agent. The installer downloads a complete directory from a public GitHub repository with file-count and size limits. Existing skill directories are not overwritten silently.
 
-**Install community themes:**
-```bash
-/plugins install zyn-theme-matrix
-/theme matrix
+See [Agent Skills](https://agentskills.io/specification) for the portable format and [Capabilities and limitations](docs/AGENT_CAPABILITIES.md) for the comparison with Claude Code and Qwen Code.
+
+## Project context
+
+Zyn reads bounded instructions from `AGENTS.md`, `CLAUDE.md` and `QWEN.md` found in the working directory and ancestor directories. These files provide project-specific guidance; they are not permission to execute arbitrary commands. The project cwd is configurable with `/cwd`.
+
+## Tools and integrations
+
+The core includes file, shell, web, model-provider and session tools. Available providers and model IDs depend on configuration and external services; use `/providers` and `/models` to inspect the active catalog. MCP servers expose additional tools and are managed with `/mcp`. Optional npm plugins can register tools.
+
+Tools and third-party packages can execute on the local machine. **There is no universal process sandbox for npm plugins or downloaded skill scripts.** Only install packages and connect servers you trust, and review commands before approving them. `/auto` adjusts approvals but does not create an isolation boundary.
+
+## Privacy and storage
+
+Session files, user preferences and imported memory are stored under `~/.zyn/` by default; set `ZYN_DATA_DIR` to change the root. User memory lives at `~/.zyn/chat/imported-memory.md`, with copies in individual session JSON files. New saves apply restrictive file permissions on POSIX systems, but the protection also depends on the operating system and directory permissions. Back up or delete this directory according to your needs.
+
+## Development and verification
+
+```sh
+npm ci
+npm run check
+npm test
+npm run test:tui
+npm run test:all
 ```
 
----
+The TUI integration tests use Python 3 with a POSIX pseudo-terminal. They cover input events, narrow terminals, large message loads, scrolling, resizing and the optional first-run memory import. Tests using simulated messages do not demonstrate provider reliability or true model reasoning quality.
 
-## Plugins
+See [Architecture](docs/ARCHITECTURE.md), [TUI testing](docs/TUI_TESTING.md), and [Capabilities and limitations](docs/AGENT_CAPABILITIES.md). Issues: [GitHub Issues](https://github.com/toZyn/Zyn-Agent/issues).
 
-Extend Zyn with community plugins from npm or a local folder. Plugins are intentionally powerful: they can add themes, tools, slash commands, prompts, UI components, and behavior changes.
-
-```bash
-/plugins                         # Open plugin manager
-/plugins list                    # List installed plugins
-/plugins install zyn-theme-neon  # Install from npm
-/plugins install ./my-plugin     # Install from a local folder
-/plugins search skill            # Search for skill plugins
-/plugins uninstall zyn-theme-neon
-```
-
-### Minimal plugin format
-
-Create a folder with a `package.json` and a `manifest.json`:
-
-```json
-{
-  "name": "zyn-plugin-example",
-  "version": "1.0.0",
-  "main": "index.js"
-}
-```
-
-```json
-{
-  "name": "zyn-plugin-example",
-  "version": "1.0.0",
-  "type": "command",
-  "description": "Adds a custom Zyn command",
-  "author": "you"
-}
-```
-
-Supported `type` values:
-- `theme` — color schemes and visual styles
-- `skill` — AI skills with YAML frontmatter
-- `tool` — custom tools such as API calls or scripts
-- `prompt` — system-prompt additions or replacements
-- `command` — slash commands
-- `ui` — UI components
-- `system` — advanced behavior changes
-
-**Security and responsibility:** Zyn asks for consent before installing plugins. By accepting, you acknowledge that a plugin can modify Zyn behavior and that you are responsible for what you install. Only install trusted plugins and review their source code first.
-
----
-
-## MCP Servers
-
-Connect to Model Context Protocol servers for external tools. Zyn accepts a single JSON object so the format is explicit and copy/paste friendly.
-
-```bash
-/mcp                                            # Open MCP manager
-/mcp connect {"name":"deepwiki","url":"https://mcp.deepwiki.com/mcp"}
-/mcp connect {"name":"local","url":"http://localhost:8080"}
-/mcp connect {"name":"fs","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}
-/mcp list                                       # List configured servers
-/mcp tools deepwiki                             # List discovered tools
-/mcp disconnect deepwiki                        # Disconnect
-```
-
-### MCP JSON fields
-
-- `name` (required): stable name used in tool names, for example `deepwiki`.
-- `url`: HTTP/SSE/streamable HTTP endpoint, for example `https://mcp.deepwiki.com/mcp`.
-- `command` + `args`: stdio server process instead of a URL.
-- `headers`: optional HTTP headers.
-- `env`: optional environment variables for stdio servers.
-- `cwd`: optional working directory for stdio servers.
-- `protocol` or `format`: optional; use `jsonrpc` to force streamable JSON-RPC. URLs ending in `/mcp` are auto-detected as JSON-RPC endpoints.
-
-When a server connects, Zyn discovers its tools and injects them into the system prompt under **MCP TOOLS**. The agent must use the exact `mcp_<server>_<tool>` name shown there.
-
----
-
-
-## User Data Location
-
-Zyn stores runtime data outside the project folder, under the current user's home directory by default:
-
-- Linux/macOS: `~/.zyn/`
-- Windows: `C:\\Users\\<User>\\.zyn\\`
-
-Sessions, transcripts, exports, background tasks, provider/model configuration, MCP servers, plugins, web UI data, session secrets, and OAuth/token files are written there instead of `data/chat` inside the repository. Set `ZYN_DATA_DIR` to override this location.
-
----
-
-## Directory Structure
-
-```
-zyn/
-├── zyn.js                    # Entry point
-├── src/
-│   ├── core/
-│   │   ├── agent.js          # Agent core (runAgentTurn, streaming, tool loop)
-│   │   ├── prompts.js        # System prompt, conversation formatting
-│   │   └── skills.js         # Skill loading (YAML frontmatter)
-│   ├── cli/
-│   │   ├── commands.js       # Slash commands, provider config, plugin/MCP mgmt
-│   │   ├── runtime.js        # CLI interface
-│   │   ├── print.js          # Terminal output, streaming
-│   │   └── selector.js       # Interactive selectors
-│   ├── tui/
-│   │   └── app.mjs           # TUI (Ink/React), themes, UI components
-│   ├── tools/
-│   │   └── index.js          # Tool definitions, execution, validation
-│   ├── providers/
-│   │   ├── scraperClient.js  # Provider routing, chat dispatch
-│   │   ├── catalog.js        # Model/provider catalog
-│   │   └── *.js              # Provider implementations (27+)
-│   ├── utils/
-│   │   ├── sessionStorage.js # Session state, history, memory
-│   │   └── transcriptStorage.js # Transcript logging
-│   └── i18n.js               # English/Spanish translations
-├── data/                     # Bundled read-only assets (skills/catalog defaults)
-├── package.json
-└── README.md
-```
-
----
-
-## Development
-
-```bash
-git clone https://github.com/toZyn/Zyn-Agent.git
-cd Zyn-Agent
-npm install
-npm run check    # Syntax check critical files
-npm start        # Run TUI
-```
-
-**Code conventions:**
-- CommonJS for Node.js files (`.js`)
-- ES Modules for TUI (`.mjs`)
-- No emojis in TUI — use text symbols
-- Spanish/English i18n for all user-facing strings
-
----
-
-## Roadmap
-
-- [ ] Plugin marketplace UI
-- [ ] More MCP server integrations
-- [ ] Custom tool creation wizard
-- [ ] Multi-session collaboration
-- [ ] Voice input/output
-- [ ] Custom theme builder
-
----
-
-## Support
-
-- **Issues:** https://github.com/toZyn/Zyn-Agent/issues
-- **Discussions:** https://github.com/toZyn/Zyn-Agent/discussions
-
----
-
-## License
-
-MIT © Maycol
-
-## Development and regression testing
-
-Run `npm ci`, `npm run check`, `npm test` and `npm run test:tui` on Node.js 22 or newer. The TUI integration suite requires Linux or another POSIX environment with Python 3 and a pseudo-terminal. `npm run test:all` runs all checks.
-
-See [Architecture](docs/ARCHITECTURE.md) and [TUI test coverage](docs/TUI_TESTING.md) for design boundaries, supported interactions, and remaining gaps.
+MIT license. See [LICENSE](LICENSE).

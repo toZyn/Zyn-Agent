@@ -50,14 +50,13 @@ const SLASH_COMMANDS = [
   { name: 'help', desc: 'full help', descEs: 'ayuda completa' },
   { name: 'status', desc: 'current status', descEs: 'estado actual' },
   { name: 'history', desc: 'recent actions', descEs: 'acciones recientes' },
-  { name: 'memory', desc: 'memory summary', descEs: 'resumen de memoria' },
-  { name: 'summary', desc: 'memory summary', descEs: 'resumen de memoria' },
+  { name: 'memory', desc: 'view, import or forget portable memory', descEs: 'ver, importar u olvidar memoria' },
+  { name: 'skills', desc: 'list, inspect and install Agent Skills', descEs: 'listar, inspeccionar e instalar Agent Skills' },
   { name: 'session', desc: 'current session', descEs: 'sesión actual' },
   { name: 'sessions', desc: 'list sessions', descEs: 'listar sesiones' },
   { name: 'new', desc: 'new session', descEs: 'nueva sesión' },
   { name: 'resume', desc: 'resume session', descEs: 'reanudar sesión' },
   { name: 'title', desc: 'rename session', descEs: 'renombrar sesión' },
-  { name: 'rename', desc: 'rename session', descEs: 'renombrar sesión' },
   { name: 'models', desc: 'list models', descEs: 'listar modelos' },
   { name: 'providers', desc: 'list/select providers', descEs: 'listar/seleccionar proveedores' },
   { name: 'provider', desc: 'manage providers (sync, set, list, remove)', descEs: 'gestionar proveedores (sync, set, list, remove)' },
@@ -65,16 +64,13 @@ const SLASH_COMMANDS = [
   { name: 'gmail', desc: 'connect Gmail account', descEs: 'conectar cuenta Gmail' },
   { name: 'persona', desc: 'set response tone/personality', descEs: 'definir tono/persona' },
   { name: 'lang', desc: 'change language', descEs: 'cambiar idioma' },
-  { name: 'language', desc: 'change language', descEs: 'cambiar idioma' },
   { name: 'auto', desc: 'auto-approval', descEs: 'auto-aprobación' },
   { name: 'config', desc: 'view/change session settings', descEs: 'ver/cambiar configuración' },
   { name: 'bg', desc: 'background: continue current turn in background', descEs: 'segundo plano: continuar el turno en background' },
   { name: 'undo', desc: 'undo last turn', descEs: 'deshacer último turno' },
   { name: 'redo', desc: 'redo last turn', descEs: 'rehacer último turno' },
   { name: 'stop', desc: 'stop agent', descEs: 'detener agente' },
-  { name: 'abort', desc: 'stop agent', descEs: 'detener agente' },
   { name: 'reset', desc: 'reset context', descEs: 'reiniciar contexto' },
-  { name: 'clear', desc: 'reset context', descEs: 'reiniciar contexto' },
   { name: 'cwd', desc: 'working directory', descEs: 'directorio de trabajo' },
   { name: 'compact', desc: 'compact memory', descEs: 'compactar memoria' },
   { name: 'theme', desc: 'UI theme', descEs: 'tema de la UI' },
@@ -85,7 +81,6 @@ const SLASH_COMMANDS = [
   { name: 'transcript', desc: 'view transcript', descEs: 'ver transcripción' },
   { name: 'export', desc: 'export to txt', descEs: 'exportar a txt' },
   { name: 'exit', desc: 'exit', descEs: 'salir' },
-  { name: 'quit', desc: 'exit', descEs: 'salir' },
 ];
 
 function parseSlashCommand(input) {
@@ -98,100 +93,30 @@ function parseSlashCommand(input) {
 }
 
 function printHelp(state = {}) {
-  const { paint } = require('./print');
-  const lang = normalizeLanguage(state.language || DEFAULT_LANGUAGE);
-  const m = (value) => paint(value, 'dim');
-  const b = (value) => paint(value, 'cyan');
-  const g = (value) => paint(value, 'green');
-  const w = (value) => paint(value, 'white');
-  const providers = listProvidersFromModels(MODELS);
-  const cols = Math.min(Math.max((process.stdout.columns || 80) - 4, 40), 120);
-  const line = '─'.repeat(cols);
-
-  const sec = (title) => { console.log(''); console.log(`  ${g(title)}`); };
-  const cmd = (usage, desc) => {
-    const pad = Math.max(4, cols - usage.length - desc.length - 6);
-    const dots = pad > 2 ? ' '.repeat(pad - 2) : '  ';
-    console.log(`    ${b(usage)}${dots}${m(desc)}`);
-  };
-
-  console.log('');
-  console.log(`  ${paint('◆', 'cyan')} ${paint('Zyn', 'cyan')} — ${m(t(lang, 'helpTitle'))}`);
-  console.log(`  ${m(line)}`);
-
-  sec(t(lang, 'usage'));
-  cmd('zyn', m(t(lang, 'interactiveMode')));
-  cmd("zyn 'question'", m(t(lang, 'singlePrompt')));
-  cmd('zyn --new', m(t(lang, 'newSession')));
-  cmd('zyn --resume ID', m(t(lang, 'resumeSession')));
-
-  sec(t(lang, 'helpSessions'));
-  cmd('/help', t(lang, 'helpShowHelp'));
-  cmd('/status', t(lang, 'helpStatusInfo'));
-  cmd('/history', t(lang, 'helpRecentActions'));
-  cmd('/memory', t(lang, 'helpMemorySummary'));
-  cmd('/session', t(lang, 'helpCurrentSession'));
-  cmd('/sessions', t(lang, 'helpListSessions'));
-  cmd('/new', t(lang, 'helpCreateSession'));
-  cmd('/resume <ID>', t(lang, 'helpResumeSession'));
-  cmd('/title <text>', t(lang, 'helpRenameSession'));
-
-  sec(t(lang, 'helpConfiguration'));
-  cmd('/models', t(lang, 'helpModelPicker'));
-  cmd('/providers', t(lang, 'helpProviderPicker'));
-  cmd('/theme', t(lang, 'helpThemePicker'));
-  cmd('/theme <name>', t(lang, 'helpThemeSwitch'));
-  cmd('/thinking on|off', m(t(lang, 'thinkingOn')) + ' / ' + m(t(lang, 'thinkingOff')));
-  cmd('/lang <en|es>', t(lang, 'helpChangeLang'));
-  cmd('/auto on|off', t(lang, 'helpAutoApprove'));
-  cmd('/persona set <text>', t(lang, 'helpSetPersona'));
-  cmd('/config show', t(lang, 'helpShowConfig'));
-  cmd('/cwd <path>', t(lang, 'helpChangeCwd'));
-
-  sec(t(lang, 'helpPlugins'));
-  cmd('/plugins', t(lang, 'helpOpenPlugins'));
-  cmd('/plugins list', t(lang, 'helpListPlugins'));
-  cmd('/plugins install <name>', t(lang, 'helpInstallPlugin'));
-  cmd('/plugins uninstall <name>', t(lang, 'helpRemovePlugin'));
-  cmd('/plugins search <query>', t(lang, 'helpSearchPlugins'));
-
-  sec(t(lang, 'helpMcpServers'));
-  cmd('/mcp', t(lang, 'helpOpenMcp'));
-  cmd('/mcp connect <json>', t(lang, 'helpConnectMcp'));
-  cmd('/mcp disconnect <name>', t(lang, 'helpDisconnectMcp'));
-  cmd('/mcp list', t(lang, 'helpListMcp'));
-  cmd('/mcp tools <name>', t(lang, 'helpListMcpTools'));
-
-  sec(t(lang, 'helpToolsGit'));
-  cmd('/git set <provider> <token>', t(lang, 'helpGitConfig'));
-  cmd('/git list', t(lang, 'helpGitList'));
-  cmd('/git remove <provider>', t(lang, 'helpGitRemove'));
-  cmd('/gmail connect', t(lang, 'helpGmailConnect'));
-  cmd('/cwd', t(lang, 'helpShowCwd'));
-
-  sec(t(lang, 'helpExport'));
-  cmd('/bg', t(lang, 'helpDetachBg'));
-  cmd('/transcript', t(lang, 'helpTranscript'));
-  cmd('/export', t(lang, 'helpExport'));
-
-  sec(t(lang, 'helpControl'));
-  cmd('/stop', `${t(lang, 'helpStop')} ${m(t(lang, 'helpEscWorks'))}`);
-  cmd('/reset', t(lang, 'helpResetContext'));
-  cmd('/exit', `${t(lang, 'helpExit')} ${m(t(lang, 'helpCtrlD'))}`);
-
-  console.log('');
-  console.log(`  ${m(line)}`);
-  console.log(`  ${m(t(lang, 'providers'))}`);
-  for (const provider of providers) {
-    const names = provider.models.map(model => model.label).join(', ');
-    const wrap = cols - 6;
-    if (names.length <= wrap) {
-      console.log(`    ${b(provider.key)}  ${m(names)}`);
-    } else {
-      console.log(`    ${b(provider.key)}  ${m(names.slice(0, wrap - 3) + '...')}`);
-    }
-  }
-  console.log('');
+  const es = normalizeLanguage(state.language || DEFAULT_LANGUAGE) === 'es';
+  const sections = es ? [
+    ['Sesiones', '/new · /resume <id> · /sessions · /title <texto> · /history'],
+    ['Modelos', '/models · /providers · /provider · /settings'],
+    ['Contexto', '/memory · /memory prompt · /memory import <archivo> · /memory forget'],
+    ['Skills', '/skills list · /skills show <nombre> [recurso] · /skills install <repo>'],
+    ['Herramientas', '/plugins · /mcp · /git · /gmail'],
+    ['Interfaz', '/theme · /lang <es|en> · /thinking on|off · /cwd'],
+    ['Operaciones', '/status · /compact · /transcript · /export · /bg'],
+    ['Control', '/help · /stop · /reset · /exit'],
+  ] : [
+    ['Sessions', '/new · /resume <id> · /sessions · /title <text> · /history'],
+    ['Models', '/models · /providers · /provider · /settings'],
+    ['Context', '/memory · /memory prompt · /memory import <file> · /memory forget'],
+    ['Skills', '/skills list · /skills show <name> [resource] · /skills install <repo>'],
+    ['Tools', '/plugins · /mcp · /git · /gmail'],
+    ['Interface', '/theme · /lang <es|en> · /thinking on|off · /cwd'],
+    ['Operations', '/status · /compact · /transcript · /export · /bg'],
+    ['Control', '/help · /stop · /reset · /exit'],
+  ];
+  console.log('\nZyn | ' + (es ? 'Comandos principales' : 'Main commands'));
+  console.log(es ? 'Usa cada comando sin argumentos para ver sus opciones.' : 'Run a command without arguments to see its options.');
+  for (const [label, commands] of sections) console.log(`\n${label}\n  ${commands}`);
+  console.log(es ? '\nCLI: zyn · zyn "consulta" · zyn --resume <id>' : '\nCLI: zyn · zyn "prompt" · zyn --resume <id>');
 }
 
 function printModels() {
@@ -469,7 +394,46 @@ async function handleLocalCommand(input, state, deps) {
   }
 
   if (commandName === 'memory' || commandName === 'summary') {
-    printMemory(state);
+    const [sub, ...rest] = args.split(' ').filter(Boolean);
+    const { getMemoryExportPrompt, saveImportedProfile } = require('../core/memory-transfer');
+    if (sub === 'prompt') console.log(getMemoryExportPrompt());
+    else if (sub === 'import' && rest.length) {
+      const filename = path.resolve(state.cwd || process.cwd(), rest.join(' '));
+      const content = await fsp.readFile(filename, 'utf8');
+      state.importedMemory = await saveImportedProfile(content);
+      const { markMemoryOnboarding } = require('../core/memory-transfer');
+      await markMemoryOnboarding();
+      await saveState(state);
+      console.log('Imported memory saved for this and future sessions.');
+    } else if (sub === 'forget') {
+      const { forgetImportedMemoryEverywhere } = require('../utils/sessionStorage');
+      state.importedMemory = '';
+      await forgetImportedMemoryEverywhere();
+      await saveState(state);
+      console.log('Imported memory deleted from Zyn sessions.');
+    } else if (!sub) {
+      printMemory(state);
+      console.log(state.importedMemory ? 'Portable profile: loaded' : 'Portable profile: none');
+    } else console.log('Usage: /memory [prompt | import <file> | forget]');
+    return true;
+  }
+
+  if (commandName === 'skills') {
+    const { listSkills, loadSkill, readSkillResource, installSkill } = require('../core/skills');
+    const [sub = 'list', name, ...extra] = args.split(' ').filter(Boolean);
+    const options = { cwd: state.cwd };
+    if (sub === 'list') {
+      const skills = listSkills(options);
+      console.log(skills.length ? skills.map(skill => `${skill.name}  ${skill.description}`).join('\n') : 'No Agent Skills found.');
+    } else if (sub === 'show' && name) {
+      const skill = loadSkill(name, options);
+      if (!skill) throw new Error('Skill not found');
+      const resource = extra.join(' ');
+      console.log(resource ? readSkillResource(name, resource, options) : `${skill.body}\n\nResources: ${skill.resources.join(', ') || 'none'}`);
+    } else if (sub === 'install' && name) {
+      const installed = await installSkill(name, extra[0] || null);
+      console.log(`Installed ${installed.name}: ${installed.files} files`);
+    } else console.log('Usage: /skills [list | show <name> [resource] | install <owner/repo/path> [name]]');
     return true;
   }
 

@@ -1,6 +1,6 @@
 ---
 name: thinking
-description: Deep analysis protocol: system definition, actors/incentives, dynamic structure, feedback loops, leverage points, and structured output for high-impact decisions.
+description: "Deep analysis protocol: system definition, actors/incentives, dynamic structure, feedback loops, leverage points, and structured output for high-impact decisions."
 ---
 
 # Protocolo de Pensamiento y Análisis Profundo

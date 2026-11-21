@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: Four-phase systematic debugging: root-cause investigation, pattern analysis, hypothesis testing, and root-cause fix. Iron law: no fixes without root-cause analysis first.
+description: "Four-phase systematic debugging: root-cause investigation, pattern analysis, hypothesis testing, and root-cause fix. Iron law: no fixes without root-cause analysis first."
 ---
 
 # Depuración Sistemática

@@ -1,6 +1,6 @@
 ---
 name: tools
-description: Strict tool invocation rules for Zyn: only the documented tools, single-line JSON, decision tree, and standard workflow.
+description: "Strict tool invocation rules for Zyn: only the documented tools, single-line JSON, decision tree, and standard workflow."
 ---
 
 # Directrices Centrales del Agente
