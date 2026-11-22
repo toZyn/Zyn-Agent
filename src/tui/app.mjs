@@ -437,14 +437,23 @@ function EventLine({ kind, title, detail, width }) {
   const cfg = {
     info: ['·', T.textGhost], think: ['◐', T.textGhost],
     comment: ['›', T.accent], tool: ['↳', T.purple],
-    ok: ['>', T.green], warn: ['▲', T.amber], error: ['x', T.red],
+    ok: ['✓', T.green], warn: ['▲', T.amber], error: ['x', T.red],
   };
   const [sym, color] = cfg[kind] || cfg.info;
   const content = formatEventPreview({ kind, title, detail }, width);
+  const isAgent = /\b(spawn_agent|wait_agent|followup_agent|resume_agent|close_agent|interrupt_agent)\b/.test(String(title || ''));
+  if (isAgent) {
+    return h(Box, { paddingLeft: width < 48 ? 1 : 3, paddingRight: 1, flexDirection: 'column' },
+      h(Box, { borderStyle: 'round', borderColor: T.borderLight, flexDirection: 'column', paddingX: 1 },
+        h(Text, { color, wrap: 'wrap' }, 'AGENT ' + sym + ' ' + String(title || '').trim()),
+        content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'wrap' }, line)),
+      ),
+    );
+  }
   return h(Box, { paddingLeft: width < 48 ? 1 : 3, paddingRight: 1, flexDirection: 'column', flexShrink: 0 },
     h(Text, { color, wrap: 'wrap' }, sym + ' ' + String(title || '').trim()),
     content.lines.length ? h(Box, { paddingLeft: 2, flexDirection: 'column', flexShrink: 0 },
-      ...content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'wrap' }, line)),
+      content.lines.map((line, i) => h(Text, { key: String(i), color: T.textMuted, wrap: 'wrap' }, line)),
     ) : null,
   );
 }

@@ -313,15 +313,18 @@ async function runAgentTurn(input, state, ui, options = {}) {
   }
 
   const turnMessages = [{ role: 'user', content: input }];
+  const recoveryMessages = [];
   await appendTranscriptEntry(state.sessionId, { type: 'user', content: input });
 
   let step = 0;
+  let stalledSteps = 0;
+  let awaitingCommentAction = false;
   let toolUsedThisTurn = false;
   const toolProgressGuard = new (require('./tool-budget').ToolProgressGuard)();
-  const finishNoProgress = async () => {
-    const content = turnLanguage === 'es'
-      ? 'Se detuvo este turno porque la misma herramienta devolvió el mismo resultado repetidamente. El historial está conservado. Puedes pedir continuar con otra estrategia.'
-      : 'Paused this turn after repeated identical tool results without progress. History is preserved. You can request another approach.';
+  const finishNoProgress = async (message) => {
+    const content = message || (turnLanguage === 'es'
+      ? 'Se detuvo este turno porque Zyn siguió intentando sin avanzar. El historial está conservado. Puedes pedir continuar con otra estrategia.'
+      : 'Paused this turn after repeated attempts without progress. History is preserved. You can request another approach.');
     state.history.push(...turnMessages, { role: 'assistant', content });
     await appendTranscriptEntry(state.sessionId, { type: 'assistant', content });
     await persistSessionState(state, ui);
@@ -343,7 +346,7 @@ async function runAgentTurn(input, state, ui, options = {}) {
 
     const messages = buildConversationMessages(
       state,
-      turnMessages,
+      [...turnMessages, ...recoveryMessages.splice(0)],
       buildSystemPrompt(state.cwd, state, { input, language: turnLanguage }),
     );
 
@@ -376,26 +379,36 @@ async function runAgentTurn(input, state, ui, options = {}) {
     }
 
     if (parsed.type === 'invalid') {
-      turnMessages.push({ role: 'user', content: parsed.error });
+      if (++stalledSteps >= 3) return await finishNoProgress();
+      recoveryMessages.push({ role: 'user', content: parsed.error });
       if (toolProgressGuard.observe({ tool: 'invalid_response', args: {} }, rawAnswer)) return await finishNoProgress();
       step++;
       continue;
     }
 
     if (parsed.type === 'comment') {
-      turnMessages.push({ role: 'assistant', content: JSON.stringify({ type: 'comment', content: parsed.content }) });
-      turnMessages.push({ role: 'user', content: turnLanguage === 'es' ? 'Continúa con la siguiente herramienta o con el resultado final. No repitas el comentario.' : 'Continue with the next tool or the final result. Do not repeat the commentary.' });
-      if (toolProgressGuard.observe({ tool: 'comment', args: {} }, parsed.content)) return await finishNoProgress();
+      if (awaitingCommentAction) {
+        const content = turnLanguage === 'es'
+          ? 'El modelo terminó su respuesta con un comentario y no envió una acción ni una respuesta final.'
+          : 'The model ended with commentary without sending an action or a final answer.';
+        return await finishNoProgress(content);
+      }
+      awaitingCommentAction = true;
+      recoveryMessages.push({ role: 'assistant', content: JSON.stringify({ type: 'comment', content: parsed.content }) });
+      recoveryMessages.push({ role: 'user', content: turnLanguage === 'es'
+        ? 'Tu respuesta quedó incompleta. Envía una sola llamada de herramienta completa o una respuesta final. No envíes otro comentario.'
+        : 'Your response was incomplete. Send one complete tool call or a final answer. Do not send another comment.' });
       step++;
       continue;
     }
 
     if (parsed.tool && !KNOWN_TOOLS.has(parsed.tool)) {
+      if (++stalledSteps >= 3) return await finishNoProgress();
       const invalidToolMsg = turnLanguage === 'en'
         ? `The tool "${parsed.tool}" does not exist. Available tools: ${[...KNOWN_TOOLS].join(', ')}. Use ONE of these exact names.`
         : `La herramienta "${parsed.tool}" no existe. Herramientas disponibles: ${[...KNOWN_TOOLS].join(', ')}. Usa UNO de estos nombres exactos.`;
-      turnMessages.push({ role: 'assistant', content: JSON.stringify({ type: 'tool', tool: parsed.tool, args: parsed.args }) });
-      turnMessages.push({ role: 'user', content: invalidToolMsg });
+      recoveryMessages.push({ role: 'assistant', content: JSON.stringify({ type: 'tool', tool: parsed.tool, args: parsed.args }) });
+      recoveryMessages.push({ role: 'user', content: invalidToolMsg });
       if (toolProgressGuard.observe(parsed, invalidToolMsg)) return await finishNoProgress();
       step++;
       continue;
@@ -428,12 +441,16 @@ async function runAgentTurn(input, state, ui, options = {}) {
       const result = await executeToolCall(parsed, state, ui, { signal });
       await appendTranscriptEntry(state.sessionId, { type: 'tool', tool: parsed.tool, args: parsed.args, result });
       turnMessages.push({ role: 'user', content: `TOOL_RESULT\n${buildToolResultMessage(parsed, result, turnLanguage)}` });
+      stalledSteps = 0;
+      awaitingCommentAction = false;
       if (toolProgressGuard.observe(parsed, result)) return await finishNoProgress();
     } catch (err) {
       if (err?.message === 'aborted' && signal?.aborted) {
         throw new Error('aborted');
       }
+      ui.logEvent?.(state, 'error', (turnLanguage === 'es' ? 'Falló ' : 'Failed ') + parsed.tool, err.message);
       turnMessages.push({ role: 'user', content: buildToolErrorMessage(parsed, err.message, turnLanguage) });
+      if (++stalledSteps >= 3) return await finishNoProgress();
     }
 
     step++;

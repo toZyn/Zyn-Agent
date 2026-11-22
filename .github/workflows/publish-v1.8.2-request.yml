@@ -1,0 +1,37 @@
+name: Authorized npm publication v1.8.2
+
+on:
+  workflow_run:
+    workflows: [GitHub release]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  request-publication:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_commit.message == 'release: v1.8.2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify authorized version and dispatch existing publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p 'require("./package.json").version')" = "1.8.2"
+          test "$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)" = "$RELEASE_SHA"
+          gh workflow run publish.yml --ref main

@@ -1,6 +1,6 @@
 {
   "name": "zyn-ai",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "Terminal coding agent with tools, persistent sessions, MCP integrations and portable Agent Skills",
   "author": "Zyn",
   "keywords": [

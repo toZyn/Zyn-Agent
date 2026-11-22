@@ -131,3 +131,18 @@ test('direct commands render their final answer exactly once through the same li
   assert.equal(result.rendered, true);
   assert.deepEqual(store.items.filter(p => p.type === 'answer').map(p => p.text), ['DIRECT_OK: comando completado.']);
 });
+
+test('different commentary without an action cannot keep the turn open', async () => {
+  const { state, ui } = context();
+  calls = 0;
+  replies = ['Primero reviso', 'Ahora compruebo'].map(content => ({
+    text: JSON.stringify({ type: 'comment', content }),
+  }));
+  const result = await runAgentTurn('Revisa CPU', state, ui);
+  assert.match(result.content, /no envió una acción ni una respuesta final/);
+  assert.equal(calls, 2);
+  assert.deepEqual(state.history, [
+    { role: 'user', content: 'Revisa CPU' },
+    { role: 'assistant', content: result.content },
+  ]);
+});
